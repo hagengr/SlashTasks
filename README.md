@@ -11,6 +11,8 @@ Open `index.html` in a modern browser. Tasks are stored in that browser's local 
 - Today, Upcoming, and All Tasks views
 - Task lists, energy labels, and recurring schedules
 - Optional due dates, reminders, and step-by-step breakdowns
+- Task list and table layouts, plus Today, Upcoming, and All step-focused views
+- Dated and timed subtasks linked visually to their parent task
 - Subtask dates and reminder support when the parent task has reminders enabled
 - Focus prompts, snoozing, and quick rescheduling
 
