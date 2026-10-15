@@ -74,6 +74,7 @@ function openModal(task=null,{addStep=false,breakdown=false}={}){
 function closeModal(){ $('#taskModal').hidden=true;editingTaskId=null;$('#taskForm').reset() }
 async function suggestSteps(){
  const title=$('#taskTitle').value.trim();if(!title){$('#suggestionStatus').textContent='Add a task name first, then I can suggest a few small steps.';$('#taskTitle').focus();return}
+ if(location.protocol==='file:'){$('#suggestionStatus').textContent='AI suggestions need the local server. Start it with OPENAI_API_KEY="your-api-key" node server.js, then open http://127.0.0.1:4173.';return}
  const button=$('#suggestStepsButton'),status=$('#suggestionStatus');button.disabled=true;button.textContent='Thinking…';status.textContent='Breaking this into small, doable steps…';
  try{
   const response=await fetch('/api/suggest-subtasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,list:$('#taskListSelect').value,energy:$('#taskEnergy').value,dueDate:$('#taskDueDate').value})});
