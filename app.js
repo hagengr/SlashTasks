@@ -65,13 +65,25 @@ function render(){
 function addStepEditorRow(step={}){const row=document.createElement('div');row.className='step-editor-row';row.dataset.id=step.id||uid();row.dataset.done=step.done?'true':'false';row.dataset.reminderNotifiedAt=step.reminderNotifiedAt||'';row.innerHTML='<input class="step-title-input" maxlength="120" placeholder="A small next step" value="'+esc(step.title||'')+'"><label class="step-date-field"><span>📅</span><input class="step-date-input" type="date" aria-label="Step due date" value="'+esc(step.dueDate||'')+'"></label><label class="step-time-field"><span>⏰</span><input class="step-time-input" type="time" aria-label="Step due time" value="'+esc(step.dueTime||'')+'"></label><button type="button" class="remove-step" aria-label="Remove step">×</button>';$('#stepEditor').append(row);return row}
 function openModal(task=null,{addStep=false,breakdown=false}={}){
   editingTaskId=task?.id||null;reminderDateManuallySet=!!task?.reminderDate&&task.reminderDate!==task.dueDate;
-  $('#taskForm').reset();$('#stepEditor').innerHTML='';
+  $('#taskForm').reset();$('#stepEditor').innerHTML='';$('#suggestionStatus').textContent='';$('#suggestStepsButton').hidden=!!task;$('#suggestStepsButton').disabled=false;$('#suggestStepsButton').textContent='✨ Suggest steps';
   $('#modalKicker').textContent=task?'EDIT TASK':'GET IT OUT OF YOUR HEAD';$('#modalTitle').textContent=task?(breakdown?'Let’s make this easier to start':'Edit this task'):'What’s on your mind?';$('#modalDescription').textContent=task?(breakdown?'Add small steps and give them dates. You can adjust the plan later.':'Change the details or add more steps.'):'Write it down. You can figure out the details later.';$('#saveTaskButton').innerHTML=task?'Save changes <span>→</span>':'Add task <span>→</span>';
   if(task){$('#taskTitle').value=task.title;$('#taskListSelect').value=task.list;$('#taskEnergy').value=task.energy;$('#taskDueDate').value=task.dueDate||'';$('#taskReminderDate').value=task.reminderDate||'';$('#taskReminderTime').value=task.reminderTime||'';$('#taskRepeat').value=task.repeat||'none';(task.steps||[]).forEach(s=>addStepEditorRow(s));}
   else{$('#taskDueDate').value=todayISO();$('#taskReminderDate').value=todayISO();addStepEditorRow();}
   if(addStep)addStepEditorRow();$('#taskModal').hidden=false;$('#taskTitle').focus();if(breakdown)$('#stepEditor').scrollIntoView({block:'nearest',behavior:'smooth'});
 }
 function closeModal(){ $('#taskModal').hidden=true;editingTaskId=null;$('#taskForm').reset() }
+async function suggestSteps(){
+ const title=$('#taskTitle').value.trim();if(!title){$('#suggestionStatus').textContent='Add a task name first, then I can suggest a few small steps.';$('#taskTitle').focus();return}
+ const button=$('#suggestStepsButton'),status=$('#suggestionStatus');button.disabled=true;button.textContent='Thinking…';status.textContent='Breaking this into small, doable steps…';
+ try{
+  const response=await fetch('/api/suggest-subtasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,list:$('#taskListSelect').value,energy:$('#taskEnergy').value,dueDate:$('#taskDueDate').value})});
+  const data=await response.json();if(!response.ok)throw new Error(data.error||'Suggestions are unavailable right now.');
+  const rows=[...$('#stepEditor').querySelectorAll('.step-editor-row')];rows.filter(row=>!row.querySelector('.step-title-input').value.trim()).forEach(row=>row.remove());
+  (data.steps||[]).forEach(step=>addStepEditorRow({title:step}));
+  status.textContent=data.steps?.length?`${data.steps.length} suggestions added below. Edit or remove any step, then save the task to confirm.`:'No suggestions this time. Add your own steps below.';
+ }catch(error){status.textContent=error.message||'Could not get suggestions. Try again.'}
+ finally{button.disabled=false;button.textContent='✨ Suggest steps'}
+}
 function toast(message){const el=$('#toast');el.textContent=message;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2600)}
 function nextRepeatDate(task){const base=task.dueDate&&task.dueDate>=todayISO()?new Date(`${task.dueDate}T12:00:00`):new Date(`${todayISO()}T12:00:00`);if(task.repeat==='daily'||task.repeat==='after1day')base.setDate(base.getDate()+1);if(task.repeat==='weekly')base.setDate(base.getDate()+7);if(task.repeat==='weekdays'){base.setDate(base.getDate()+1);if(base.getDay()===6)base.setDate(base.getDate()+2);if(base.getDay()===0)base.setDate(base.getDate()+1)}return`${base.getFullYear()}-${String(base.getMonth()+1).padStart(2,'0')}-${String(base.getDate()).padStart(2,'0')}`}
 function addDays(date,count){if(!date)return'';const d=new Date(`${date}T12:00:00`);d.setDate(d.getDate()+count);return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
@@ -101,6 +113,7 @@ taskList.addEventListener('change',e=>{const row=e.target.closest('.task-row');i
 $('#taskDueDate').addEventListener('input',()=>{if(!reminderDateManuallySet)$('#taskReminderDate').value=$('#taskDueDate').value});$('#taskReminderDate').addEventListener('input',()=>{reminderDateManuallySet=true});
 $('#addStepButton').addEventListener('click',()=>{const row=addStepEditorRow();row.querySelector('.step-title-input').focus()});$('#stepEditor').addEventListener('click',e=>{const remove=e.target.closest('.remove-step');if(remove){remove.closest('.step-editor-row').remove()}});
 $('#taskForm').addEventListener('submit',saveTask);
+$('#suggestStepsButton').addEventListener('click',suggestSteps);
 $('#calloutPick').addEventListener('click',chooseTask);$('#focusButton').addEventListener('click',()=>{focusMode=!focusMode;document.body.classList.toggle('focus-active',focusMode);$('#focusButton').innerHTML=focusMode?'<span>×</span> Exit focus':'<span>◎</span> Focus mode';if(focusMode)chooseTask()});
 $('#sortButton').addEventListener('click',()=>{prioritySort=!prioritySort;$('#sortButton').innerHTML=prioritySort?'↕ <span>Priority</span>':'↕ <span>Incomplete first</span>';render()});
 $('#addList').addEventListener('click',()=>{const name=prompt('Name your list');if(name&&name.trim()&&!state.lists.includes(name.trim())){state.lists.push(name.trim());save();render()}});
