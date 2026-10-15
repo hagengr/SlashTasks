@@ -1,0 +1,12 @@
+{
+  "name": "slashtasks",
+  "version": "0.2.0",
+  "private": true,
+  "description": "A calmer task manager, one small step at a time.",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test tests/*.test.cjs",
+    "check": "node --check app.js && node --check task-model.js && node --check server.js"
+  },
+  "engines": { "node": ">=18" }
+}

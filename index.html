@@ -1,52 +1,117 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="theme-color" content="#f6f4ef" />
-  <title>SlashTasks — make room for what matters</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css" />
-  <link rel="stylesheet" href="styles-extra.css" />
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f8f9f5">
+  <meta name="description" content="A calmer place to capture tasks, plan small steps, and find one thing to start.">
+  <title>SlashTasks · One step at a time</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <script src="task-model.js" defer></script>
+  <script src="app.js" defer></script>
 </head>
 <body>
+  <a class="skip-link" href="#main">Skip to tasks</a>
   <div class="app-shell">
-    <aside class="sidebar">
-      <a class="brand" href="#" aria-label="SlashTasks home"><span class="brand-mark">/</span><span>SlashTasks</span></a>
-      <button class="new-task-side" id="sideAdd"><span>＋</span> New task <kbd>N</kbd></button>
-      <div class="nav-label">YOUR SPACE</div>
-      <nav class="main-nav" aria-label="Main navigation">
-        <button class="nav-item active" data-view="today"><span class="nav-icon">◷</span> Today <span class="nav-count" id="todayCount">0</span></button>
-        <button class="nav-item" data-view="upcoming"><span class="nav-icon">▦</span> Upcoming</button>
-        <button class="nav-item" data-view="all"><span class="nav-icon">☷</span> All tasks</button>
+    <aside class="sidebar" aria-label="Workspace">
+      <a class="brand" href="#" data-action="home"><span class="brand-mark">/</span>SlashTasks<span class="beta">beta</span></a>
+      <button class="primary new-task" id="sideAdd">＋ New task <kbd>N</kbd></button>
+      <p class="nav-label">YOUR SPACE</p>
+      <nav class="main-nav" aria-label="Views">
+        <button data-view="today" class="nav-item active"><span aria-hidden="true">☀</span> Today <span class="count" id="todayCount"></span></button>
+        <button data-view="upcoming" class="nav-item"><span aria-hidden="true">↗</span> Upcoming</button>
+        <button data-view="unscheduled" class="nav-item"><span aria-hidden="true">◌</span> Unscheduled</button>
+        <button data-view="all" class="nav-item"><span aria-hidden="true">▤</span> All tasks</button>
       </nav>
-      <div class="nav-label projects-label">LISTS <button id="addList" aria-label="Add list">＋</button></div>
-      <nav class="list-nav" id="listNav" aria-label="Lists"></nav>
-      <div class="sidebar-bottom"><div class="tip-icon">✦</div><div><strong>Small steps count.</strong><p>You don’t have to do it all. Just the next thing.</p></div></div>
-      <div class="profile"><div class="avatar">H</div><div><strong>Hagen</strong><small>Making progress</small></div><button aria-label="More options">···</button></div>
+      <div class="nav-label lists-heading">LISTS <button id="addList" class="icon-button" aria-label="Add a list">＋</button></div>
+      <nav id="listNav" class="list-nav" aria-label="Lists"></nav>
+      <div class="sidebar-note"><span aria-hidden="true">🌱</span><strong>Small steps count.</strong><p>You only need a place to start.</p></div>
+      <button id="settingsButton" class="settings-link">⚙ Settings &amp; backup <span id="aiIndicator" class="status-dot" title="AI status"></span></button>
+      <p class="local-note">Saved in this browser</p>
     </aside>
 
-    <main class="main-content">
-      <header class="topbar"><div class="breadcrumbs"><span>My space</span><span class="slash">/</span><strong id="viewCrumb">Today</strong></div><div class="top-actions"><button class="icon-button" id="searchButton" aria-label="Search">⌕</button><button class="icon-button" aria-label="Help">?</button><div class="top-avatar">H</div></div></header>
-      <section class="content-wrap">
-        <div class="greeting-row"><div><div class="date-line" id="dateLine"></div><h1 id="pageTitle">Good afternoon, Hagen <span class="wave">✳</span></h1><p class="subtitle" id="pageSubtitle">A little progress is still progress. Pick what feels doable.</p></div><button class="focus-button" id="focusButton"><span>◎</span> Focus mode</button></div>
-        <div class="day-card" id="dayCard"><div class="day-copy"><div class="day-eyebrow"><span class="sun-icon">☀</span> YOUR DAY, AT A GLANCE</div><div class="progress-head"><strong id="progressTitle">You’re getting started</strong><span id="progressCount">0 of 0 done</span></div><div class="progress-track"><div class="progress-fill" id="progressFill"></div></div><p id="progressNote">Choose one small thing to begin. You’ve got this.</p></div><div class="day-art" aria-hidden="true"><div class="art-sun"></div><div class="art-hill hill-back"></div><div class="art-hill hill-front"></div><div class="art-star">✦</div></div></div>
-
-        <section class="task-section"><div class="section-heading"><div><h2 id="taskHeading">Today’s focus</h2><span class="section-note" id="taskSectionNote">Keep it light. You can always add more later.</span></div><div class="section-actions"><div class="mode-switch" aria-label="Task view mode"><button class="mode-button active" type="button" data-mode="tasks">Tasks</button><button class="mode-button" type="button" data-mode="steps">Steps</button></div><button class="sort-button" id="sortButton">↕ <span>Priority</span></button><button class="view-toggle" id="viewToggle" type="button">☰ List</button></div></div>
-          <div class="focus-callout" id="focusCallout"><span class="callout-spark">✦</span><div class="callout-content"><strong>Start with one thing</strong><p>Pick the task that would make today feel a little easier.</p><div class="callout-result" id="calloutResult" hidden></div></div><button id="calloutPick">Help me choose <span>→</span></button></div>
-          <div class="task-list" id="taskList"></div>
-          <button class="add-task-row" id="addTaskRow"><span>＋</span> Add a task <kbd>N</kbd></button>
-          <div class="empty-state" id="emptyState" hidden><div class="empty-illustration">✧</div><h3>Nothing on your plate here</h3><p>That’s a nice place to be. Add a task whenever something comes to mind.</p><button class="primary-button" id="emptyAdd">＋ Add a task</button></div>
+    <main id="main" class="main-content" tabindex="-1">
+      <header class="topbar"><span>My space <span class="crumb-slash">/</span> <strong id="viewCrumb">Today</strong></span><label class="search"><span aria-hidden="true">⌕</span><input id="searchInput" type="search" placeholder="Find a task or step" aria-label="Search tasks and steps"><kbd>/</kbd></label></header>
+      <div class="content-wrap">
+        <div id="storageNotice" class="notice error" role="alert" hidden></div>
+        <div id="launchNotice" class="notice" hidden>For AI suggestions and settings, open SlashTasks through the local server. <span>Double-click <strong>start.command</strong> in the project folder.</span></div>
+        <header class="page-heading"><div><p class="eyebrow" id="dateLine"></p><h1 id="pageTitle">Today</h1><p id="pageSubtitle" class="muted">One small step is a good place to start.</p></div><button id="focusButton" class="secondary" aria-pressed="false">◎ Focus mode</button></header>
+        <section id="dayCard" class="day-summary" aria-label="At a glance"></section>
+        <section id="focusCallout" class="focus-callout" aria-labelledby="focusTitle">
+          <div class="focus-copy"><p class="eyebrow">A LITTLE MOMENTUM</p><h2 id="focusTitle">Start with one thing</h2><p id="focusHint" class="muted">Let’s find a small next step.</p><div id="calloutResult" class="callout-result" aria-live="polite" hidden></div></div>
+          <button id="calloutPick" class="primary">Help me choose <span aria-hidden="true">→</span></button>
         </section>
-        <div class="gentle-reminder"><span>☁</span><p><strong>Remember:</strong> rest is productive too. Your pace is the right pace.</p></div>
-      </section>
+        <section id="upcomingPlanner" class="planner" aria-label="Prepare for upcoming tasks" hidden></section>
+        <section id="workSection" class="work-section" aria-label="Your tasks">
+          <div class="section-heading"><h2 id="taskHeading">Your tasks</h2><span id="resultCount" class="muted"></span></div>
+          <div class="toolbar">
+            <div class="segmented" role="group" aria-label="Organize by"><button data-mode="tasks" aria-pressed="true">Tasks</button><button data-mode="steps" aria-pressed="false">Steps</button></div>
+            <div class="segmented layout-control" role="group" aria-label="Layout"><button data-layout="list" aria-pressed="true">☰ List</button><button data-layout="table" aria-pressed="false">▦ Table</button></div>
+            <label class="sort-control"><span class="sr-only">Sort tasks</span><select id="sortSelect"><option value="due">↕ Due date</option><option value="energy">↕ Energy</option></select></label>
+            <label class="completed-control"><input id="showCompleted" type="checkbox">Show completed</label>
+          </div>
+          <div id="taskList" class="task-list"></div>
+          <div id="emptyState" class="empty-state" hidden><span class="empty-icon" aria-hidden="true">✦</span><h3 id="emptyTitle">A little breathing room</h3><p id="emptyMessage" class="muted"></p><button class="secondary" id="emptyAdd">＋ Add a task</button></div>
+          <button id="addTaskRow" class="add-task-row">＋ Add a task <kbd>N</kbd></button>
+        </section>
+        <p class="gentle-reminder">Progress counts, even when it’s small.</p>
+      </div>
     </main>
   </div>
 
-  <div class="modal-backdrop" id="taskModal" hidden><section class="task-modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle"><button class="modal-close" id="closeModal" aria-label="Close">×</button><div class="modal-kicker" id="modalKicker">GET IT OUT OF YOUR HEAD</div><h2 id="modalTitle">What’s on your mind?</h2><p class="modal-description" id="modalDescription">Write it down. You can figure out the details later.</p><form id="taskForm"><label class="sr-only" for="taskTitle">Task name</label><input id="taskTitle" class="task-input" placeholder="e.g. Reply to Sam’s email" maxlength="120" autocomplete="off" required /><div class="form-options"><label>🏷️ LIST<select id="taskListSelect"><option value="Personal">🏠 Personal</option><option value="Work">💼 Work</option><option value="Home">🏡 Home</option></select></label><label>⚡ ENERGY<select id="taskEnergy"><option value="small">🌱 Small</option><option value="medium">🌿 Medium</option><option value="big">🔥 Big</option></select></label><label>📅 DUE DATE<input id="taskDueDate" type="date"></label></div><div class="advanced-options"><div class="field-group"><div class="field-name">⏰ REMIND ME</div><span class="field-hint">Date; optional time</span><div class="reminder-fields"><label class="sr-only" for="taskReminderDate">Reminder date</label><input id="taskReminderDate" type="date"><label class="sr-only" for="taskReminderTime">Reminder time</label><input id="taskReminderTime" type="time"></div></div><label>🔁 REPEAT<select id="taskRepeat"><option value="none">Doesn’t repeat</option><option value="daily">Every day</option><option value="weekdays">Weekdays</option><option value="weekly">Every week</option><option value="after1day">1 day after I complete it</option></select></label></div><div class="reminder-hint">If you leave the time blank, reminders arrive at 9:00 AM.</div><div class="steps-heading"><div class="steps-label"><span class="steps-label-title">🧩 MAKE IT EASIER TO START</span><span>Optional · add a date and time to each step</span></div><button class="suggest-steps-button" id="suggestStepsButton" type="button">✨ Suggest steps</button></div><div id="suggestionStatus" class="suggestion-status" role="status" aria-live="polite"></div><div id="stepEditor" class="step-editor"></div><button class="add-step-button" id="addStepButton" type="button">＋ Add a step</button><div class="modal-footer"><span>↵ <small>to save</small></span><button class="primary-button" id="saveTaskButton" type="submit">Add task <span>→</span></button></div></form></section></div>
-  <div class="toast" id="toast" role="status"></div>
-  <script src="app.js"></script>
+  <dialog id="taskModal" class="task-modal" aria-labelledby="modalTitle">
+    <form id="taskForm">
+      <div class="dialog-heading"><div><p class="eyebrow" id="modalKicker">GET IT OUT OF YOUR HEAD</p><h2 id="modalTitle">Add a task</h2></div><button type="button" class="icon-button" id="closeModal" aria-label="Close task editor">×</button></div>
+      <label class="sr-only" for="taskTitle">Task name</label>
+      <input id="taskTitle" class="task-input" placeholder="What would you like to get done?" maxlength="120" autocomplete="off" required>
+      <div class="form-grid">
+        <label><span>📁 List</span><select id="taskListSelect"></select></label>
+        <label><span>⚡ Energy</span><select id="taskEnergy"><option value="small">🌱 Small</option><option value="medium">🌿 Medium</option><option value="big">🔥 Big</option></select></label>
+        <label><span>📅 Due date</span><input id="taskDueDate" type="date"></label>
+      </div>
+      <section class="steps-section" aria-labelledby="stepsTitle">
+        <div class="steps-heading"><div><h3 id="stepsTitle">🧩 Make it easier to start</h3><p class="field-hint">A few small steps. Dates and times are optional.</p></div><button type="button" class="secondary compact" id="suggestStepsButton">✦ Suggest steps</button></div>
+        <div id="suggestionStatus" class="suggestion-status" aria-live="polite"></div>
+        <section id="suggestionReview" class="suggestion-review" aria-label="Review suggested steps" hidden>
+          <div class="review-heading"><strong>Suggested steps</strong><button type="button" id="dismissSuggestions" class="text-button">Dismiss</button></div>
+          <p class="field-hint">Keep the ones that help. Edit them before adding.</p>
+          <div id="suggestionList"></div>
+          <button type="button" id="acceptSuggestions" class="primary compact">Add selected steps</button>
+        </section>
+        <div id="stepEditor" class="step-editor"></div>
+        <button type="button" id="addStepButton" class="text-button add-step">＋ Add a step</button>
+      </section>
+      <details id="taskDetails" class="task-details">
+        <summary>⏰ Reminders &amp; repeat <span id="detailsSummary"></span></summary>
+        <label class="toggle-label"><input type="checkbox" id="taskReminderEnabled">Remind me about this task and its dated steps</label>
+        <div id="reminderFields" class="reminder-fields" hidden><label><span>Reminder date</span><input id="taskReminderDate" type="date"></label><label><span>Time <small>(optional)</small></span><input id="taskReminderTime" type="time"></label></div>
+        <p class="field-hint" id="reminderNote">Reminders appear while the app is open. A blank time uses 9:00 AM.</p>
+        <label class="repeat-field"><span>🔁 Repeat</span><select id="taskRepeat"><option value="none">Doesn’t repeat</option><option value="daily">Every day</option><option value="weekdays">Weekdays</option><option value="weekly">Every week</option><option value="after1day">1 day after completion</option></select></label>
+      </details>
+      <div class="dialog-footer"><button type="button" id="deleteTaskButton" class="text-button danger" hidden>Delete task</button><span class="keyboard-hint">Enter to save</span><button id="saveTaskButton" type="submit" class="primary">Add task →</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="completionDialog" class="small-dialog" aria-labelledby="completionTitle">
+    <span class="celebration" aria-hidden="true">✦</span><h2 id="completionTitle">You finished every step.</h2><p id="completionMessage" class="muted"></p>
+    <div class="completion-actions"><button id="completeParent" class="primary">Complete the task ✓</button><button id="addMoreSteps" class="secondary">There’s more to do</button><button class="text-button" data-close="completionDialog">Keep the task open</button></div>
+  </dialog>
+
+  <dialog id="listDialog" class="small-dialog" aria-labelledby="listDialogTitle"><form id="listForm"><h2 id="listDialogTitle">A place for related tasks</h2><label><span>List name</span><input id="newListName" maxlength="40" placeholder="e.g. Side project" required></label><div class="dialog-footer"><button type="button" class="text-button" data-close="listDialog">Cancel</button><button class="primary">Add list</button></div></form></dialog>
+
+  <dialog id="settingsDialog" class="settings-dialog" aria-labelledby="settingsTitle">
+    <div class="dialog-heading"><h2 id="settingsTitle">Make yourself at home</h2><button class="icon-button" data-close="settingsDialog" aria-label="Close settings">×</button></div>
+    <section class="settings-section"><h3>✦ AI step suggestions</h3><p class="muted">Optional help turning a task into small, doable steps.</p><p id="aiConnectionStatus" class="notice" role="status"></p>
+      <form id="aiSettingsForm"><label><span>OpenAI API key</span><input id="apiKeyInput" type="password" autocomplete="off" placeholder="Paste a key to set up or replace it"></label><p class="field-hint">Stored in a private .env file on this Mac. Task names and existing steps are sent to OpenAI when you ask for suggestions.</p><button id="saveApiKey" class="secondary">Save API key</button></form>
+      <p id="settingsStatus" role="status" class="suggestion-status"></p>
+    </section>
+    <section class="settings-section"><h3>Keep a copy of your tasks</h3><p class="muted">Tasks live in this browser. A backup lets you move them between browsers or from the old file version.</p><div class="button-row"><button id="exportTasks" class="secondary">↓ Export backup</button><button id="importTasks" class="secondary">↑ Import &amp; merge</button></div><input id="importFile" type="file" accept=".json,application/json" hidden><p id="backupStatus" role="status" class="suggestion-status"></p></section>
+    <section class="settings-section"><h3>Gentle reminders</h3><p class="muted" id="notificationStatus"></p><button id="enableNotifications" class="secondary">Enable browser notifications</button></section>
+    <p class="field-hint">SlashTasks beta · One step at a time</p>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden><span id="toastMessage"></span><button id="undoButton" hidden>Undo</button></div>
+  <noscript><p class="notice">SlashTasks needs JavaScript enabled to save and organize your tasks.</p></noscript>
 </body>
 </html>

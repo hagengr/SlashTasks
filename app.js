@@ -1,123 +1,649 @@
-const STORAGE_KEY='slashtasks-v1';
-const todayISO=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`};
-const uid=()=>crypto.randomUUID();
-const initialTasks=[
-  {id:'t1',title:'Send the project update to Maya',list:'Work',dueDate:todayISO(),energy:'small',repeat:'none',reminderDate:'',reminderTime:'',steps:[],done:false,priority:1},
-  {id:'t2',title:'Book a dentist appointment',list:'Personal',dueDate:todayISO(),energy:'small',repeat:'none',reminderDate:'',reminderTime:'',steps:[{id:'s1',title:'Find the dentist’s phone number',dueDate:'',done:false},{id:'s2',title:'Call to ask for an opening',dueDate:'',done:false}],done:false,priority:2},
-  {id:'t3',title:'Tidy up the desk for 10 minutes',list:'Home',dueDate:todayISO(),energy:'medium',repeat:'none',reminderDate:'',reminderTime:'',steps:[],done:false,priority:3},
-  {id:'t4',title:'Pick up a few groceries',list:'Personal',dueDate:todayISO(),energy:'medium',repeat:'none',reminderDate:'',reminderTime:'',steps:[],done:false,priority:4},
-  {id:'t5',title:'Review the notes from Monday',list:'Work',dueDate:'',energy:'big',repeat:'none',reminderDate:'',reminderTime:'',steps:[],done:false,priority:5}
-];
-let state=loadState(),activeView='today',focusMode=false,prioritySort=true,editingTaskId=null,reminderDateManuallySet=false,activeMode='tasks',tableView=false,calloutSelection=null,expandedTableTasks=new Set();
-const $=s=>document.querySelector(s), taskList=$('#taskList');
-function normalizeStep(step){return typeof step==='string'?{id:uid(),title:step,dueDate:'',dueTime:'',done:false}:{id:step.id||uid(),title:step.title||'',dueDate:step.dueDate||'',dueTime:step.dueTime||'',done:!!step.done,reminderNotifiedAt:step.reminderNotifiedAt||null}}
-function loadState(){try{const saved=JSON.parse(localStorage.getItem(STORAGE_KEY));if(!saved)return{tasks:initialTasks,lists:['Personal','Work','Home']};saved.lists||=['Personal','Work','Home'];saved.tasks||=[];saved.tasks=saved.tasks.map((t,i)=>{let reminderDate=t.reminderDate||'',reminderTime=t.reminderTime||'';if(t.reminderAt&&!reminderDate){const d=new Date(t.reminderAt);reminderDate=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;reminderTime=`${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`}return{...t,dueDate:t.dueDate??(t.when==='today'?todayISO():''),reminderDate,reminderTime,repeat:t.repeat||'none',steps:(Array.isArray(t.steps)?t.steps:[]).map(normalizeStep),priority:t.priority??i}});return saved}catch{return{tasks:initialTasks,lists:['Personal','Work','Home']}}}
-function save(){localStorage.setItem(STORAGE_KEY,JSON.stringify(state))}
-function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-function dateLabel(date){if(!date)return'Someday';if(date===todayISO())return'Today';return new Intl.DateTimeFormat('en-US',{month:'short',day:'numeric'}).format(new Date(`${date}T12:00:00`))}
-function relativeDue(date){if(!date)return'Someday';if(date===todayISO())return'Today';if(date<todayISO()){const days=Math.round((new Date(`${todayISO()}T12:00:00`)-new Date(`${date}T12:00:00`))/86400000);return`Overdue · ${days}d`}return dateLabel(date)}
-function taskVisible(t){if(activeView==='all')return true;if(activeView==='today')return!!t.dueDate&&t.dueDate<=todayISO();if(activeView==='upcoming')return!t.dueDate||t.dueDate>todayISO()||(t.steps||[]).some(s=>!s.done&&s.dueDate>todayISO());return t.list===activeView}
-function stepVisible(task,step){if(activeView==='all')return true;if(activeView==='today')return step.dueDate?step.dueDate<=todayISO():!!task.dueDate&&task.dueDate<=todayISO();if(activeView==='upcoming')return step.dueDate?step.dueDate>todayISO():!task.dueDate||task.dueDate>todayISO();return task.list===activeView}
-function reminderInstant(date,time=''){if(!date)return null;return new Date(`${date}T${time||'09:00'}:00`).getTime()}
-function repeatLabel(value){return({daily:'Daily',weekdays:'Weekdays',weekly:'Weekly',after1day:'After done'})[value]||''}
-function upcomingCard(){
-  const tasks=state.tasks.filter(t=>!t.done&&(!t.dueDate||t.dueDate>todayISO()||(t.steps||[]).some(s=>!s.done&&s.dueDate>todayISO())));
-  const datedSteps=tasks.flatMap(t=>(t.steps||[]).filter(s=>!s.done&&s.dueDate&&s.dueDate>todayISO()).map(s=>({task:t,step:s}))).sort((a,b)=>a.step.dueDate.localeCompare(b.step.dueDate)).slice(0,3);
-  const needsSteps=tasks.filter(t=>!(t.steps||[]).length||(t.steps||[]).some(s=>!s.dueDate)).slice(0,3);
-  $('#dayCard').innerHTML=`<div class="upcoming-card-copy"><div class="day-eyebrow"><span class="sun-icon">✦</span> A GENTLE HEAD START</div><div class="upcoming-card-heading">${datedSteps.length?'Steps coming up':'Make upcoming tasks easier to start'}</div>${datedSteps.length?`<div class="upcoming-mini-list">${datedSteps.map(({task,step})=>`<div class="upcoming-mini-row"><span>${esc(step.title)}</span><small>${esc(relativeDue(step.dueDate))}</small><button data-edit-task="${esc(task.id)}" aria-label="Edit ${esc(task.title)}">Edit</button></div>`).join('')}</div>`:`<p class="upcoming-card-note">Choose a task and add a few dated steps. You can move them around later.</p>`}${needsSteps.length?`<div class="upcoming-actions">${needsSteps.map(t=>`<button class="upcoming-task-chip" data-breakdown="${esc(t.id)}">＋ Break down: ${esc(t.title)}</button>`).join('')}</div>`:''}</div><div class="day-art" aria-hidden="true"><div class="art-sun"></div><div class="art-hill hill-back"></div><div class="art-hill hill-front"></div><div class="art-star">✦</div></div>`;
-}
-function listIcon(list){return ({Personal:'🌿',Home:'🏠',Work:'💼'})[list]||'📁'}
-function energyIcon(value){return ({small:'🌱',medium:'⚡',big:'🔥'})[value]||'✨'}
-function energyName(value){return ({small:'Quick',medium:'Steady',big:'Big focus'})[value]||'Steady'}
-function taskColor(task){const colors={Personal:'#c18b68',Home:'#779d7d',Work:'#718db3'};if(colors[task.list])return colors[task.list];let hash=0;for(const c of task.id)hash=(hash*31+c.charCodeAt(0))|0;return ['#ad83a5','#b29355','#648f8d'][Math.abs(hash)%3]}
-function dueMarkup(date){if(!date)return '<span class="due-badge">Someday</span>';if(date===todayISO())return '<span class="due-badge due-today">⏰ Today</span>';if(date===addDays(todayISO(),1))return '<span class="due-badge due-soon">↗ Tomorrow</span>';return '<span class="due-badge">'+esc(relativeDue(date))+'</span>'}
-function taskRows(tasks){
- const sorted=[...tasks].sort((a,b)=>prioritySort?Number(a.done)-Number(b.done)||a.priority-b.priority:Number(a.done)-Number(b.done));
- if(tableView)return '<div class="task-table" role="table" aria-label="Tasks"><div class="task-table-head" role="row"><span>Task</span><span>List</span><span>Energy</span><span>Due</span><span>Steps</span></div>'+sorted.map(t=>{const steps=t.steps||[],expanded=expandedTableTasks.has(t.id);return '<div class="task-table-group"><div class="task-table-row task-row '+(t.done?'done':'')+'" role="row" data-id="'+esc(t.id)+'"><span class="table-task-cell"><button class="check-button" aria-label="'+(t.done?'Mark incomplete':'Complete task')+'">'+(t.done?'✓':'')+'</button><button type="button" class="task-title" data-edit-task="'+esc(t.id)+'">'+esc(t.title)+'</button></span><span class="task-list-tag">'+listIcon(t.list)+' '+esc(t.list)+'</span><span class="energy-tag '+esc(t.energy)+'">'+energyIcon(t.energy)+' '+energyName(t.energy)+'</span><span class="task-date">'+dueMarkup(t.dueDate)+'</span><button class="table-steps-link" data-toggle-steps="'+esc(t.id)+'" aria-expanded="'+expanded+'">'+steps.filter(s=>!s.done).length+'/'+steps.length+' <span>'+ (expanded?'⌃':'⌄') +'</span></button></div><div class="task-table-steps '+(expanded?'expanded':'')+'" '+(expanded?'':'hidden')+' data-id="'+esc(t.id)+'">'+(steps.length?steps.map((step,i)=>'<div class="table-subtask-row task-row '+(step.done?'step-done':'')+'" data-id="'+esc(t.id)+'"><span class="table-subtask-name"><input type="checkbox" data-step="'+i+'" '+(step.done?'checked':'')+'><span>'+esc(step.title)+'</span></span><span class="table-subtask-due">'+dueMarkup(step.dueDate)+(step.dueTime?'<small>'+esc(step.dueTime)+'</small>':'')+'</span><span class="table-subtask-parent"><i style="--task-accent:'+taskColor(t)+'"></i>'+esc(t.title)+'</span></div>').join(''):'<div class="table-subtask-empty">No steps yet. <button data-edit-task="'+esc(t.id)+'">Add one</button></div>')+'</div></div>'}).join('')+'</div>';
- return sorted.map(t=>{const steps=t.steps||[],checked=steps.filter(s=>s.done).length,repeat=t.repeat&&t.repeat!=='none'?'<span class="repeat-tag">↻ '+repeatLabel(t.repeat)+'</span>':'',reminder=t.reminderDate?'<span class="reminder-tag">⏰ '+esc(dateLabel(t.reminderDate))+(t.reminderTime?' · '+esc(t.reminderTime):'')+'</span>':'';
- return '<article class="task-row '+(t.done?'done':'')+'" data-id="'+esc(t.id)+'"><button class="check-button" aria-label="'+(t.done?'Mark incomplete':'Complete task')+'">'+(t.done?'✓':'')+'</button><div class="task-main"><button type="button" class="task-title" data-edit-task="'+esc(t.id)+'">'+esc(t.title)+'</button><div class="task-meta"><span class="task-list-tag">'+listIcon(t.list)+' '+esc(t.list)+'</span><span class="energy-tag '+esc(t.energy)+'">'+energyIcon(t.energy)+' '+energyName(t.energy)+'</span>'+repeat+reminder+'</div></div><span class="task-date">'+esc(relativeDue(t.dueDate))+'</span><details class="task-actions"><summary aria-label="Task actions">···</summary><div class="action-menu"><button data-action="snooze">Snooze 10 min</button><button data-action="tomorrow">Move to tomorrow</button><button data-action="delete">Delete task</button></div></details>'+(steps.length?'<button class="steps-toggle">'+checked+'/'+steps.length+' steps <span>⌄</span></button><div class="task-steps" hidden>'+steps.map((step,i)=>'<label class="step-row '+(step.done?'step-done':'')+'"><input type="checkbox" data-step="'+i+'" '+(step.done?'checked':'')+'><span>'+esc(step.title)+'</span><small>'+esc(relativeDue(step.dueDate))+(step.dueTime?' · '+esc(step.dueTime):'')+'</small></label>').join('')+'</div>':'')+'</article>'
- }).join('')
-}
-function stepVisible(task,step){if(activeView==='all')return true;if(activeView==='today')return step.dueDate?step.dueDate<=todayISO():!!task.dueDate&&task.dueDate<=todayISO();if(activeView==='upcoming')return step.dueDate?step.dueDate>todayISO():!task.dueDate||task.dueDate>todayISO();return task.list===activeView}
-function stepRows(){
- const rows=[];state.tasks.filter(t=>!t.done).forEach(task=>{const steps=(task.steps||[]).filter(step=>!step.done&&stepVisible(task,step));if(steps.length)steps.forEach((step,index)=>rows.push({task,step,index:(task.steps||[]).indexOf(step)}));else if(!(task.steps||[]).length&&taskVisible(task))rows.push({task,step:null,index:-1})});
- rows.sort((a,b)=>(a.step?.dueDate||a.task.dueDate||'9999-99-99').localeCompare(b.step?.dueDate||b.task.dueDate||'9999-99-99')||a.task.priority-b.task.priority);
- if(!rows.length)return '';
- return '<div class="step-table" role="table" aria-label="Task steps"><div class="step-table-head" role="row"><span>Next step</span><span>When</span><span>For task</span></div>'+rows.map(({task,step,index})=>'<div class="step-table-row task-row '+(step?'':'needs-step')+'" role="row" data-id="'+esc(task.id)+'" style="--task-accent:'+taskColor(task)+'"><span class="step-table-name">'+(step?'<input type="checkbox" data-step="'+index+'" aria-label="Complete '+esc(step.title)+'"><span>'+esc(step.title)+'</span>':'<span class="step-placeholder">＋ No steps yet</span>')+'</span><span class="step-when">'+(step?(step.dueDate?esc(relativeDue(step.dueDate)):'<span class="no-date">Add a date</span>')+(step.dueTime?' · '+esc(step.dueTime):''):(task.dueDate?esc(relativeDue(task.dueDate)):'<span class="no-date">Unscheduled</span>'))+'</span><button class="parent-task-link" data-edit-task="'+esc(task.id)+'"><span class="parent-task-dot"></span>'+esc(task.title)+'</button></div>').join('')+'</div>'
-}
-function render(){
- const names={today:'Today',upcoming:'Upcoming',all:'All tasks'},pageName=names[activeView]||activeView,viewTasks=state.tasks.filter(taskVisible),todayTasks=state.tasks.filter(t=>t.dueDate===todayISO()),doneToday=todayTasks.filter(t=>t.done).length,openToday=state.tasks.filter(t=>!t.done&&t.dueDate&&t.dueDate<=todayISO()).length,percent=todayTasks.length?Math.round(doneToday/todayTasks.length*100):0;
- $('#dateLine').textContent=new Intl.DateTimeFormat('en-US',{weekday:'long',month:'long',day:'numeric'}).format(new Date()).toUpperCase();$('#viewCrumb').textContent=pageName;
- $('#pageTitle').innerHTML=activeView==='today'?'Good afternoon, Hagen <span class="wave">✳</span>':esc(pageName);
- $('#pageSubtitle').textContent=activeView==='today'?'A little progress is still progress. Pick what feels doable.':activeView==='upcoming'?'Make future tasks feel smaller before they arrive.':'Everything you’ve captured, all in one place.';
- $('#taskHeading').textContent=activeMode==='steps'?pageName+' steps':activeView==='today'?'Today’s focus':pageName+' tasks';$('#taskSectionNote').textContent=activeMode==='steps'?'See each next step beside the task it belongs to.':activeView==='today'?'Keep it light. You can always add more later.':'Take things one step at a time.';
- $('#todayCount').textContent=openToday;
- if(activeView==='upcoming')upcomingCard();else $('#dayCard').innerHTML='<div class="day-copy"><div class="day-eyebrow"><span class="sun-icon">☀</span> YOUR DAY, AT A GLANCE</div><div class="progress-head"><strong>'+(!todayTasks.length?'A fresh start':percent===100?'You did it!':doneToday?'You’re making progress':'You’re getting started')+'</strong><span>'+doneToday+' of '+todayTasks.length+' done</span></div><div class="progress-track"><div class="progress-fill" style="width:'+percent+'%"></div></div><p>'+(percent===100?'You showed up for yourself today. That counts.':doneToday?'Look at you go. Keep your pace gentle.':'Choose one small thing to begin. You’ve got this.')+'</p></div><div class="day-art" aria-hidden="true"><div class="art-sun"></div><div class="art-hill hill-back"></div><div class="art-hill hill-front"></div><div class="art-star">✦</div></div>';
- taskList.innerHTML=activeMode==='steps'?stepRows():taskRows(viewTasks);taskList.classList.toggle('steps-mode',activeMode==='steps');taskList.classList.toggle('table-mode',activeMode==='tasks'&&tableView);
- $('#focusCallout').hidden=activeView!=='today'||activeMode==='steps';$('#focusCallout strong').textContent=openToday===0?'Get a head start':'Start with one thing';$('#focusCallout p').textContent=openToday===0?'Break down an upcoming task into a few dated steps.':'Pick the task that would make today feel a little easier.';$('#calloutPick').innerHTML='Help me choose <span>→</span>';
- const result=$('#calloutResult');result.hidden=!calloutSelection;if(calloutSelection){const task=calloutSelection.taskId&&state.tasks.find(t=>t.id===calloutSelection.taskId);if(calloutSelection.taskId&&!task){calloutSelection=null;result.hidden=true}else{result.hidden=false;result.innerHTML='<span class="result-label">'+esc(calloutSelection.label)+'</span>'+(task?'<button class="result-task-link" data-edit-task="'+esc(task.id)+'">'+esc(task.title)+' <span>↗</span></button>':'')+'<span class="result-hint">'+esc(calloutSelection.hint)+'</span>'}}
- const empty=activeMode==='steps'?!taskList.innerHTML:!viewTasks.length;$('#emptyState').hidden=!empty;taskList.hidden=empty;$('#addTaskRow').hidden=empty;
- document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.view===activeView));document.querySelectorAll('.mode-button').forEach(b=>b.classList.toggle('active',b.dataset.mode===activeMode));
- $('#viewToggle').innerHTML=tableView?'▦ Table':'☰ List';$('#viewToggle').setAttribute('aria-label',tableView?'Current view: table. Switch to list view':'Current view: list. Switch to table view');$('#viewToggle').title=tableView?'Current view: Table':'Current view: List';
- $('#listNav').innerHTML=state.lists.map((name,i)=>'<button class="list-item '+(activeView===name?'active':'')+'" data-list="'+esc(name)+'"><span class="list-dot" style="background:'+['#d59e62','#819fce','#c28caf','#88a88c','#ca8680'][i%5]+'"></span>'+esc(name)+'<span class="nav-count">'+state.tasks.filter(t=>t.list===name&&!t.done).length+'</span></button>').join('');
- $('#taskListSelect').innerHTML=state.lists.map(n=>'<option value="'+esc(n)+'">'+esc(n)+'</option>').join('');
-}
-function addStepEditorRow(step={}){const row=document.createElement('div');row.className='step-editor-row';row.dataset.id=step.id||uid();row.dataset.done=step.done?'true':'false';row.dataset.reminderNotifiedAt=step.reminderNotifiedAt||'';row.innerHTML='<input class="step-title-input" maxlength="120" placeholder="A small next step" value="'+esc(step.title||'')+'"><label class="step-date-field"><span>📅</span><input class="step-date-input" type="date" aria-label="Step due date" value="'+esc(step.dueDate||'')+'"></label><label class="step-time-field"><span>⏰</span><input class="step-time-input" type="time" aria-label="Step due time" value="'+esc(step.dueTime||'')+'"></label><button type="button" class="remove-step" aria-label="Remove step">×</button>';$('#stepEditor').append(row);return row}
-function openModal(task=null,{addStep=false,breakdown=false}={}){
-  editingTaskId=task?.id||null;reminderDateManuallySet=!!task?.reminderDate&&task.reminderDate!==task.dueDate;
-  $('#taskForm').reset();$('#stepEditor').innerHTML='';$('#suggestionStatus').textContent='';$('#suggestStepsButton').hidden=!!task;$('#suggestStepsButton').disabled=false;$('#suggestStepsButton').textContent='✨ Suggest steps';
-  $('#modalKicker').textContent=task?'EDIT TASK':'GET IT OUT OF YOUR HEAD';$('#modalTitle').textContent=task?(breakdown?'Let’s make this easier to start':'Edit this task'):'What’s on your mind?';$('#modalDescription').textContent=task?(breakdown?'Add small steps and give them dates. You can adjust the plan later.':'Change the details or add more steps.'):'Write it down. You can figure out the details later.';$('#saveTaskButton').innerHTML=task?'Save changes <span>→</span>':'Add task <span>→</span>';
-  if(task){$('#taskTitle').value=task.title;$('#taskListSelect').value=task.list;$('#taskEnergy').value=task.energy;$('#taskDueDate').value=task.dueDate||'';$('#taskReminderDate').value=task.reminderDate||'';$('#taskReminderTime').value=task.reminderTime||'';$('#taskRepeat').value=task.repeat||'none';(task.steps||[]).forEach(s=>addStepEditorRow(s));}
-  else{$('#taskDueDate').value=todayISO();$('#taskReminderDate').value=todayISO();addStepEditorRow();}
-  if(addStep)addStepEditorRow();$('#taskModal').hidden=false;$('#taskTitle').focus();if(breakdown)$('#stepEditor').scrollIntoView({block:'nearest',behavior:'smooth'});
-}
-function closeModal(){ $('#taskModal').hidden=true;editingTaskId=null;$('#taskForm').reset() }
-async function suggestSteps(){
- const title=$('#taskTitle').value.trim();if(!title){$('#suggestionStatus').textContent='Add a task name first, then I can suggest a few small steps.';$('#taskTitle').focus();return}
- if(location.protocol==='file:'){$('#suggestionStatus').textContent='AI suggestions need the local server. Start it with OPENAI_API_KEY="your-api-key" node server.js, then open http://127.0.0.1:4173.';return}
- const button=$('#suggestStepsButton'),status=$('#suggestionStatus');button.disabled=true;button.textContent='Thinking…';status.textContent='Breaking this into small, doable steps…';
- try{
-  const response=await fetch('/api/suggest-subtasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,list:$('#taskListSelect').value,energy:$('#taskEnergy').value,dueDate:$('#taskDueDate').value})});
-  const data=await response.json();if(!response.ok)throw new Error(data.error||'Suggestions are unavailable right now.');
-  const rows=[...$('#stepEditor').querySelectorAll('.step-editor-row')];rows.filter(row=>!row.querySelector('.step-title-input').value.trim()).forEach(row=>row.remove());
-  (data.steps||[]).forEach(step=>addStepEditorRow({title:step}));
-  status.textContent=data.steps?.length?`${data.steps.length} suggestions added below. Edit or remove any step, then save the task to confirm.`:'No suggestions this time. Add your own steps below.';
- }catch(error){status.textContent=error.message||'Could not get suggestions. Try again.'}
- finally{button.disabled=false;button.textContent='✨ Suggest steps'}
-}
-function toast(message){const el=$('#toast');el.textContent=message;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2600)}
-function nextRepeatDate(task){const base=task.dueDate&&task.dueDate>=todayISO()?new Date(`${task.dueDate}T12:00:00`):new Date(`${todayISO()}T12:00:00`);if(task.repeat==='daily'||task.repeat==='after1day')base.setDate(base.getDate()+1);if(task.repeat==='weekly')base.setDate(base.getDate()+7);if(task.repeat==='weekdays'){base.setDate(base.getDate()+1);if(base.getDay()===6)base.setDate(base.getDate()+2);if(base.getDay()===0)base.setDate(base.getDate()+1)}return`${base.getFullYear()}-${String(base.getMonth()+1).padStart(2,'0')}-${String(base.getDate()).padStart(2,'0')}`}
-function addDays(date,count){if(!date)return'';const d=new Date(`${date}T12:00:00`);d.setDate(d.getDate()+count);return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
-function completeTask(task){task.done=!task.done;if(task.done&&task.repeat&&task.repeat!=='none'){const nextDate=nextRepeatDate(task),base=task.dueDate||todayISO(),shift=Math.round((new Date(`${nextDate}T12:00:00`)-new Date(`${base}T12:00:00`))/86400000),next={...task,id:uid(),seriesId:task.seriesId||task.id,dueDate:nextDate,reminderDate:task.reminderDate?nextDate:'',reminderTime:task.reminderTime||'',reminderNotifiedAt:null,steps:(task.steps||[]).map(s=>({...s,id:uid(),dueDate:s.dueDate?addDays(s.dueDate,shift):'',done:false,reminderNotifiedAt:null})),done:false,priority:Date.now()};task.nextOccurrenceId=next.id;state.tasks.unshift(next);toast(`Done. Next one is on ${dateLabel(nextDate)}.`)}else if(!task.done&&task.nextOccurrenceId){const next=state.tasks.find(t=>t.id===task.nextOccurrenceId);if(next&&!next.done)state.tasks=state.tasks.filter(t=>t.id!==next.id);delete task.nextOccurrenceId;toast('Marked as not done.')}else if(task.done)toast('Nice work. One less thing to carry.');save();render()}
-function requestNotificationPermission(){if('Notification'in window&&Notification.permission==='default')Notification.requestPermission()}
-function notify(title,body){toast(body);if('Notification'in window&&Notification.permission==='granted')new Notification(title,{body})}
-function checkReminders(){const now=Date.now();let changed=false;for(const task of state.tasks){if(task.done)continue;const snooze=task.snoozedUntil?new Date(task.snoozedUntil).getTime():null,parentAt=snooze||reminderInstant(task.reminderDate,task.reminderTime);if(parentAt&&!task.reminderNotifiedAt&&parentAt<=now){task.reminderNotifiedAt=new Date().toISOString();task.snoozedUntil=null;changed=true;notify('SlashTasks reminder',task.title)}if(task.reminderDate){for(const step of task.steps||[]){const at=reminderInstant(step.dueDate,step.dueTime||task.reminderTime);if(step.dueDate&&!step.done&&!step.reminderNotifiedAt&&at<=now){step.reminderNotifiedAt=new Date().toISOString();changed=true;notify('SlashTasks · '+task.title,step.title)}}}}if(changed)save()}
-function chooseTask(){const due=state.tasks.find(t=>!t.done&&t.dueDate&&t.dueDate<=todayISO());if(due){calloutSelection={taskId:due.id,label:'A good place to start today',hint:'Open this task to see the details and next steps.'};render();document.querySelector('#calloutResult')?.scrollIntoView({behavior:'smooth',block:'nearest'});return}const task=state.tasks.find(t=>!t.done&&(!(t.steps||[]).length||(t.steps||[]).some(s=>!s.done&&!s.dueDate)))||state.tasks.find(t=>!t.done);if(task){calloutSelection={taskId:task.id,label:'Let’s make this easier to start',hint:'Open the task to add a small step and give it a date.'};render();document.querySelector('#calloutResult')?.scrollIntoView({behavior:'smooth',block:'nearest'});return}calloutSelection={taskId:null,label:'All clear',hint:'You’re all caught up. Nice work!'};render()}
-function saveTask(e){e.preventDefault();const title=$('#taskTitle').value.trim();if(!title)return;const dueDate=$('#taskDueDate').value,reminderDate=$('#taskReminderDate').value,reminderTime=$('#taskReminderTime').value;let task=editingTaskId?state.tasks.find(t=>t.id===editingTaskId):null;const steps=[...$('#stepEditor').querySelectorAll('.step-editor-row')].map(row=>{const id=row.dataset.id||uid(),stepDate=row.querySelector('.step-date-input').value,stepTime=row.querySelector('.step-time-input').value,old=task?.steps.find(s=>s.id===id);return{id,title:row.querySelector('.step-title-input').value.trim(),dueDate:stepDate,dueTime:stepTime,done:old?.done??(row.dataset.done==='true'),reminderNotifiedAt:old?.dueDate===stepDate&&old?.dueTime===stepTime?old?.reminderNotifiedAt||null:null}}).filter(s=>s.title);if(task){const reminderChanged=task.reminderDate!==reminderDate||task.reminderTime!==reminderTime;if(reminderChanged){task.reminderNotifiedAt=null;task.snoozedUntil=null}Object.assign(task,{title,list:$('#taskListSelect').value,energy:$('#taskEnergy').value,dueDate,reminderDate,reminderTime,repeat:$('#taskRepeat').value,steps});toast('Changes saved.')}else{task={id:uid(),title,list:$('#taskListSelect').value,dueDate,energy:$('#taskEnergy').value,repeat:$('#taskRepeat').value,reminderDate,reminderTime,reminderNotifiedAt:null,steps,done:false,priority:Date.now()};state.tasks.unshift(task);toast('Captured. You can think about it later.')}save();closeModal();calloutSelection=null;activeView=task.dueDate&&task.dueDate>todayISO()?'upcoming':task.dueDate?'today':'all';render();if(task.reminderDate)requestNotificationPermission()}
-document.querySelectorAll('.nav-item').forEach(b=>b.addEventListener('click',()=>{activeView=b.dataset.view;render()}));
-$('#listNav').addEventListener('click',e=>{const b=e.target.closest('[data-list]');if(b){activeView=b.dataset.list;render()}});
-$('#dayCard').addEventListener('click',e=>{const edit=e.target.closest('[data-edit-task]'),breakdown=e.target.closest('[data-breakdown]'),id=edit?.dataset.editTask||breakdown?.dataset.breakdown;if(!id)return;const task=state.tasks.find(t=>t.id===id);if(task)openModal(task,{addStep:!!breakdown&&!task.steps.length,breakdown:!!breakdown})});
-document.querySelectorAll('.mode-button').forEach(button=>button.addEventListener('click',()=>{activeMode=button.dataset.mode;render()}));
-$('#viewToggle').addEventListener('click',()=>{tableView=!tableView;render()});
-$('#calloutResult').addEventListener('click',e=>{const link=e.target.closest('[data-edit-task]');if(!link)return;const task=state.tasks.find(t=>t.id===link.dataset.editTask);if(task)openModal(task,{addStep:!task.steps.length,breakdown:!task.steps.length})});
-taskList.addEventListener('click',e=>{
-  const toggleSteps=e.target.closest('[data-toggle-steps]');if(toggleSteps){const id=toggleSteps.dataset.toggleSteps;expandedTableTasks.has(id)?expandedTableTasks.delete(id):expandedTableTasks.add(id);render();return}
-  const edit=e.target.closest('[data-edit-task]');if(edit){const task=state.tasks.find(t=>t.id===edit.dataset.editTask);if(task)openModal(task);return}
-  const breakdown=e.target.closest('[data-breakdown]');if(breakdown){const task=state.tasks.find(t=>t.id===breakdown.dataset.breakdown);if(task)openModal(task,{addStep:!task.steps.length,breakdown:true});return}
-  const row=e.target.closest('.task-row');if(!row)return;const task=state.tasks.find(t=>t.id===row.dataset.id);if(!task)return;
-  if(e.target.closest('.check-button'))completeTask(task);
-  else if(e.target.closest('.steps-toggle'))row.querySelector('.task-steps').hidden=!row.querySelector('.task-steps').hidden;
-  else{const action=e.target.closest('[data-action]')?.dataset.action;if(action==='snooze'){task.snoozedUntil=new Date(Date.now()+10*60000).toISOString();task.reminderNotifiedAt=null;save();render();toast('Reminder snoozed for 10 minutes.')}if(action==='tomorrow'){const nextDate=addDays(todayISO(),1);task.dueDate=nextDate;if(task.reminderDate)task.reminderDate=nextDate;task.reminderNotifiedAt=null;task.snoozedUntil=null;save();render();toast('Moved to tomorrow.')}if(action==='delete'&&confirm(`Delete “${task.title}”?`)){state.tasks=state.tasks.filter(t=>t.id!==task.id);save();render()}}
-});
-taskList.addEventListener('change',e=>{const row=e.target.closest('.task-row');if(!row)return;const task=state.tasks.find(t=>t.id===row.dataset.id);if(!task)return;const index=e.target.dataset.step;if(index===undefined)return;task.steps[Number(index)].done=e.target.checked;save();render();if(task.steps.length&&task.steps.every(s=>s.done)){if(confirm(`All steps are done for “${task.title}”. Mark the full task complete?\n\nChoose Cancel to add more steps.`))completeTask(task);else openModal(task,{addStep:true,breakdown:true})}});
-['sideAdd','addTaskRow','emptyAdd'].forEach(id=>$('#'+id).addEventListener('click',()=>openModal()));$('#closeModal').addEventListener('click',closeModal);$('#taskModal').addEventListener('click',e=>{if(e.target===$('#taskModal'))closeModal()});
-$('#taskDueDate').addEventListener('input',()=>{if(!reminderDateManuallySet)$('#taskReminderDate').value=$('#taskDueDate').value});$('#taskReminderDate').addEventListener('input',()=>{reminderDateManuallySet=true});
-$('#addStepButton').addEventListener('click',()=>{const row=addStepEditorRow();row.querySelector('.step-title-input').focus()});$('#stepEditor').addEventListener('click',e=>{const remove=e.target.closest('.remove-step');if(remove){remove.closest('.step-editor-row').remove()}});
-$('#taskForm').addEventListener('submit',saveTask);
-$('#suggestStepsButton').addEventListener('click',suggestSteps);
-$('#calloutPick').addEventListener('click',chooseTask);$('#focusButton').addEventListener('click',()=>{focusMode=!focusMode;document.body.classList.toggle('focus-active',focusMode);$('#focusButton').innerHTML=focusMode?'<span>×</span> Exit focus':'<span>◎</span> Focus mode';if(focusMode)chooseTask()});
-$('#sortButton').addEventListener('click',()=>{prioritySort=!prioritySort;$('#sortButton').innerHTML=prioritySort?'↕ <span>Priority</span>':'↕ <span>Incomplete first</span>';render()});
-$('#addList').addEventListener('click',()=>{const name=prompt('Name your list');if(name&&name.trim()&&!state.lists.includes(name.trim())){state.lists.push(name.trim());save();render()}});
-$('#searchButton').addEventListener('click',()=>{const q=prompt('Search tasks');if(!q)return;const matches=state.tasks.filter(t=>t.title.toLowerCase().includes(q.toLowerCase()));toast(matches.length?`${matches.length} matching task${matches.length===1?'':'s'}`:'No matching tasks yet')});
-document.addEventListener('keydown',e=>{const modalOpen=!$('#taskModal').hidden,target=e.target;if(modalOpen&&e.key==='Enter'&&!e.shiftKey&&!target.closest?.('textarea,select,button')){e.preventDefault();$('#taskForm').requestSubmit();return}if(e.key==='Escape'&&modalOpen)closeModal();if(e.key.toLowerCase()==='n'&&!e.metaKey&&!e.ctrlKey&&!target.matches?.('input,select,textarea')){e.preventDefault();openModal()}});
-render();checkReminders();setInterval(checkReminders,15000);
+/* SlashTasks UI. Task rules live in task-model.js; the server is optional. */
+(() => {
+  'use strict';
+  const M = window.SlashTasksModel;
+  const $ = selector => document.querySelector(selector);
+  const STORAGE_KEY = 'slashtasks-v1';
+  const PREFS_KEY = 'slashtasks-preferences';
+  const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  const clone = value => JSON.parse(JSON.stringify(value));
+  const listIcon = list => ({ Personal: '🌿', Work: '💼', Home: '🏠' })[list] || '📁';
+  const energyText = energy => ({ small: '🌱 Small', medium: '🌿 Medium', big: '🔥 Big' })[energy] || '🌿 Medium';
+  const repeats = { daily: 'Daily', weekdays: 'Weekdays', weekly: 'Weekly', after1day: 'After completion' };
+  const localServer = ['http:', 'https:'].includes(location.protocol);
+  let storageLocked = false, rawRecovery = null, recoveryExported = false;
+
+  function sampleState() {
+    return M.normalize({ lists: ['Personal', 'Work', 'Home'], tasks: [
+      { id: 't1', title: 'Send the project update to Maya', list: 'Work', dueDate: M.today(), energy: 'small', steps: [] },
+      { id: 't2', title: 'Book a dentist appointment', list: 'Personal', dueDate: M.today(), energy: 'small', steps: [
+        { id: 's1', title: 'Find the dentist’s phone number' }, { id: 's2', title: 'Call to ask for an opening' }
+      ] },
+      { id: 't3', title: 'Tidy up the desk for 10 minutes', list: 'Home', dueDate: M.today(), energy: 'medium' },
+      { id: 't4', title: 'Pick up a few groceries', list: 'Personal', dueDate: M.addDays(M.today(), 1), energy: 'medium' },
+      { id: 't5', title: 'Review the notes from Monday', list: 'Work', dueDate: '', energy: 'big' }
+    ] });
+  }
+
+  function loadState() {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (!saved) return sampleState();
+      rawRecovery = saved;
+      const parsed = JSON.parse(saved);
+      if (!Array.isArray(parsed?.tasks)) throw new Error('Invalid task data');
+      return M.normalize(parsed);
+    } catch {
+      storageLocked = true;
+      $('#storageNotice').hidden = false;
+      $('#storageNotice').textContent = 'Your saved tasks could not be read. They have been left untouched. Open Settings to export a recovery copy.';
+      return M.normalize({});
+    }
+  }
+  let state = loadState();
+  let prefs = { mode: 'tasks', layout: 'list', sort: 'due', completed: false };
+  try { prefs = { ...prefs, ...JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') }; } catch { /* Preferences can reset safely. */ }
+  if (!['tasks', 'steps'].includes(prefs.mode)) prefs.mode = 'tasks';
+  if (!['list', 'table'].includes(prefs.layout)) prefs.layout = 'list';
+  let activeView = 'today', query = '', focused = false, chosenId = null, undoState = null, toastTimer;
+  let editingTaskId = null, editorOriginal = '', reminderManual = false, modalReturnFocus = null;
+  let suggestionController = null, suggestionEpoch = 0, suggestions = [], cooldownUntil = 0;
+  let completionTaskId = null, apiStatus = { available: localServer, configured: false };
+
+  function persist() {
+    if (storageLocked) { toast('Saved data needs recovery first. Export it in Settings.'); return false; }
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      $('#storageNotice').hidden = true;
+      return true;
+    } catch {
+      $('#storageNotice').hidden = false;
+      $('#storageNotice').textContent = 'This browser could not save your changes. Export a backup in Settings before leaving.';
+      return false;
+    }
+  }
+  function change(action, message, allowUndo = true) {
+    const previous = clone(state);
+    action();
+    if (!persist()) { state = previous; render(); toast('Could not save that change. Please export a backup.'); return false; }
+    undoState = allowUndo ? previous : null;
+    render();
+    if (message) toast(message, allowUndo);
+    return true;
+  }
+  function toast(message, undo = false) {
+    clearTimeout(toastTimer);
+    $('#toastMessage').textContent = message;
+    $('#undoButton').hidden = !undo;
+    $('#toast').hidden = false;
+    toastTimer = setTimeout(() => { $('#toast').hidden = true; }, undo ? 10000 : 6500);
+  }
+  function savePrefs() { try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch { /* Tasks have their own error handling. */ } }
+  function hash(value) { let n = 0; for (const c of value) n = (n * 31 + c.charCodeAt(0)) | 0; return n >>> 0; }
+  const color = task => ['#648e72', '#8d88ad', '#b28c56', '#668eaa', '#b88283', '#719d97'][hash(task.id) % 6];
+  const expansionId = task => 'steps-' + hash(task.id);
+  const expanded = new Set();
+  const taskById = id => state.tasks.find(task => task.id === id);
+  function dateText(date) {
+    if (!date) return 'No date';
+    if (date === M.today()) return 'Today';
+    if (date === M.addDays(M.today(), 1)) return 'Tomorrow';
+    if (date < M.today()) return 'Overdue · ' + new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(new Date(date + 'T12:00:00'));
+    return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(new Date(date + 'T12:00:00'));
+  }
+  function due(date, time = '', inherited = false) {
+    const cls = date && date < M.today() ? 'overdue' : date === M.today() ? 'today' : date === M.addDays(M.today(), 1) ? 'soon' : '';
+    const icon = cls === 'today' ? '⏰ ' : cls === 'soon' ? '↗ ' : '';
+    return '<span class="due-badge ' + cls + '"' + (inherited ? ' title="Uses the parent task’s due date"' : '') + '>' +
+      (inherited ? 'Task: ' : icon) + esc(dateText(date)) + (time ? ' · ' + esc(time) : '') + '</span>';
+  }
+  function parentLink(task) {
+    return '<button class="parent-link" data-edit-task="' + esc(task.id) + '"><i class="task-dot" aria-hidden="true"></i>' + esc(task.title) + ' ↗</button>';
+  }
+  function checkTask(task) {
+    return '<button class="check-button" data-complete-task="' + esc(task.id) + '" aria-label="' +
+      (task.done ? 'Reopen ' : 'Complete ') + esc(task.title) + '" aria-pressed="' + task.done + '">' + (task.done ? '✓' : '') + '</button>';
+  }
+  function checkStep(task, s) {
+    return '<input type="checkbox" data-task="' + esc(task.id) + '" data-step="' + esc(s.id) + '" aria-label="' +
+      (s.done ? 'Reopen ' : 'Complete ') + esc(s.title) + '"' + (s.done ? ' checked' : '') + '>';
+  }
+  function stepsToggle(task) {
+    const done = task.steps.filter(s => s.done).length;
+    return '<button class="steps-toggle" data-toggle-steps="' + esc(task.id) + '" aria-controls="' + expansionId(task) +
+      '" aria-expanded="' + expanded.has(task.id) + '">' + done + '/' + task.steps.length + ' steps ' + (expanded.has(task.id) ? '⌃' : '⌄') + '</button>';
+  }
+  function stepLine(task, s) {
+    return '<div class="step-line ' + (s.done ? 'step-done' : '') + '">' + checkStep(task, s) + '<span class="step-name">' +
+      esc(s.title) + '</span><button class="step-date-button" data-edit-task="' + esc(task.id) + '" data-focus-step="' + esc(s.id) +
+      '" aria-label="Schedule ' + esc(s.title) + '">' + due(s.dueDate, s.dueTime) + '</button></div>';
+  }
+  function taskMenu(task) {
+    return '<details class="task-actions"><summary aria-label="Actions for ' + esc(task.title) + '">⋯</summary><div class="action-menu">' +
+      '<button data-edit-task="' + esc(task.id) + '">Edit task</button><button data-tomorrow="' + esc(task.id) + '">Move to tomorrow</button>' +
+      (task.remindersEnabled ? '<button data-snooze="' + esc(task.id) + '">Snooze 10 minutes</button>' : '') +
+      '<button class="danger" data-delete="' + esc(task.id) + '">Delete task</button></div></details>';
+  }
+  function taskCards(tasks) {
+    return tasks.map(task => {
+      const stepsToday = task.steps.filter(s => !s.done && s.dueDate && s.dueDate <= M.today()).length;
+      return '<article class="task-card ' + (task.done ? 'done' : '') + '" style="--task-accent:' + color(task) + '">' +
+        '<div class="task-main-row">' + checkTask(task) + '<div class="task-copy"><button class="task-title" data-edit-task="' + esc(task.id) + '">' +
+        esc(task.title) + '</button><div class="task-meta"><span class="list-tag">' + listIcon(task.list) + ' ' + esc(task.list) +
+        '</span><span class="energy-tag ' + task.energy + '">' + energyText(task.energy) + '</span>' +
+        (task.repeat !== 'none' ? '<span>↻ ' + repeats[task.repeat] + '</span>' : '') +
+        (task.remindersEnabled ? '<span title="Reminders enabled">⏰ Reminders</span>' : '') +
+        (stepsToday && task.dueDate > M.today() ? '<span>' + stepsToday + ' step' + (stepsToday === 1 ? '' : 's') + ' due today</span>' : '') +
+        '</div></div>' + due(task.dueDate) + taskMenu(task) + '</div>' + (task.steps.length ? stepsToggle(task) +
+        '<div class="task-steps" id="' + expansionId(task) + '"' + (expanded.has(task.id) ? '' : ' hidden') + '>' +
+        task.steps.map(s => stepLine(task, s)).join('') + '</div>' : '') + '</article>';
+    }).join('');
+  }
+  function taskTable(tasks) {
+    return '<div class="table-wrap"><table class="tasks-table"><caption class="sr-only">Your tasks</caption><thead><tr><th scope="col">Task</th><th scope="col">List</th><th scope="col">Energy</th><th scope="col">Due</th><th scope="col">Steps</th></tr></thead>' +
+      tasks.map(task => '<tbody><tr class="' + (task.done ? 'done' : '') + '"><td><div class="table-title">' +
+        checkTask(task) + '<button class="task-title" data-edit-task="' + esc(task.id) + '">' + esc(task.title) + '</button>' + taskMenu(task) +
+        '</div></td><td>' + listIcon(task.list) + ' ' + esc(task.list) + '</td><td><span class="energy-tag ' + task.energy + '">' +
+        energyText(task.energy) + '</span></td><td>' + due(task.dueDate) + '</td><td>' + stepsToggle(task) +
+        '</td></tr></tbody><tbody id="' + expansionId(task) + '" style="--task-accent:' + color(task) + '"' +
+        (expanded.has(task.id) ? '' : ' hidden') + '>' +
+        (task.steps.length ? task.steps.map(s => '<tr class="child-row"><td><div class="step-line ' + (s.done ? 'step-done' : '') +
+          '">' + checkStep(task, s) + '<span class="step-name">' + esc(s.title) + '</span></div></td><td class="child-parent">' +
+          listIcon(task.list) + ' ' + esc(task.list) + '</td><td class="child-parent">↳ Step</td><td><button class="step-date-button" data-edit-task="' +
+          esc(task.id) + '" data-focus-step="' + esc(s.id) + '">' + due(s.dueDate, s.dueTime) +
+          '</button></td><td></td></tr>').join('') : '<tr class="child-row"><td colspan="5"><button class="text-button" data-breakdown="' +
+          esc(task.id) + '">＋ Add the first step</button></td></tr>') + '</tbody>').join('') + '</table></div>';
+  }
+  function stepRows(rows) {
+    const table = prefs.layout === 'table';
+    const content = rows.map(({ task, step: s, date, inherited }) => {
+      const stepName = s ? checkStep(task, s) + '<span class="step-name">' + esc(s.title) + '</span>' :
+        task.steps.length ? '<button class="text-button" data-complete-task="' + esc(task.id) + '">All steps done · Complete task ✓</button><button class="text-button" data-breakdown="' + esc(task.id) + '">＋ Add more</button>' :
+        '<button class="text-button" data-breakdown="' + esc(task.id) + '">＋ Break into smaller steps</button>';
+      const when = '<button class="step-date-button" data-edit-task="' + esc(task.id) + '"' + (s ? ' data-focus-step="' + esc(s.id) + '"' : '') + '>' +
+        due(date, s?.dueTime, inherited) + '</button>';
+      if (table) return '<tr class="' + (s?.done ? 'step-done' : '') + '" style="--task-accent:' + color(task) + '"><td><div class="step-line">' +
+        stepName + '</div></td><td>' + when + '</td><td>' + parentLink(task) + '</td></tr>';
+      return '<article class="task-card step-card ' + (s?.done ? 'step-done' : '') + '" style="--task-accent:' + color(task) +
+        '"><div class="step-line">' + stepName + when + '</div>' + parentLink(task) + '</article>';
+    }).join('');
+    return table ? '<div class="table-wrap"><table class="tasks-table"><caption class="sr-only">Steps and their parent tasks</caption><thead><tr><th scope="col">Next step</th><th scope="col">When</th><th scope="col">For task</th></tr></thead><tbody>' + content + '</tbody></table></div>' : content;
+  }
+  function currentOptions() { return { view: activeView, query, completed: prefs.completed, sort: prefs.sort }; }
+  function renderFocus() {
+    $('#focusCallout').hidden = activeView !== 'today' && !focused;
+    const task = chosenId && taskById(chosenId);
+    if (task && !task.done) {
+      const selection = M.choose({ tasks: [task] });
+      $('#calloutResult').hidden = false;
+      $('#focusTitle').textContent = selection.planning ? 'Make tomorrow a little easier' : 'Here’s one small place to start';
+      $('#focusHint').textContent = selection.planning ? 'Give this task a small next step and a date.' : 'You only need to do the next step.';
+      $('#calloutResult').innerHTML = '<span class="result-context">' + (selection.step ? 'NEXT STEP' : 'YOUR TASK') + '</span><button class="task-title" data-edit-task="' +
+        esc(task.id) + '" data-breakdown-focus="true">' + esc(selection.step?.title || task.title) + ' ↗</button>' +
+        (selection.step ? '<span class="result-context">For ' + esc(task.title) + '</span>' : '<span class="result-context">Open to add a small step and choose a date.</span>');
+      $('#calloutPick').textContent = 'Choose another ↻';
+    } else {
+      chosenId = null;
+      $('#calloutResult').hidden = true;
+      const open = state.tasks.some(t => !t.done);
+      $('#focusTitle').textContent = open ? 'Start with one thing' : 'A little breathing room';
+      $('#focusHint').textContent = open ? 'Let’s find a small next step, even if nothing is due today.' : 'Nothing left to choose. Add something whenever it comes to mind.';
+      $('#calloutPick').textContent = 'Help me choose →';
+      $('#calloutPick').disabled = !open;
+    }
+  }
+  function render() {
+    const names = { today: 'Today', upcoming: 'Upcoming', unscheduled: 'Unscheduled', all: 'All tasks' };
+    const name = names[activeView] || activeView;
+    $('#dateLine').textContent = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'long', day: 'numeric' }).format(new Date()).toUpperCase();
+    $('#viewCrumb').textContent = name;
+    $('#pageTitle').textContent = name;
+    $('#pageSubtitle').textContent = ({ today: 'One small step is a good place to start.', upcoming: 'Make a little room for what’s coming.', unscheduled: 'Captured for later. Add a date when you’re ready.', all: 'Everything you’ve captured, in one place.' })[activeView] || 'A little structure for the things that matter.';
+    const todayTasks = state.tasks.filter(t => M.taskMatches(t, 'today'));
+    const openToday = todayTasks.filter(t => !t.done).length;
+    const todaySteps = M.stepsFor(state, { view: 'today' }).filter(r => r.step).length;
+    $('#todayCount').textContent = openToday || '';
+    $('#dayCard').hidden = activeView !== 'today';
+    const doneToday = todayTasks.filter(t => t.done).length, total = todayTasks.length;
+    $('#dayCard').innerHTML = '<span><strong>' + openToday + '</strong> tasks in reach</span><span><strong>' + todaySteps + '</strong> steps to take</span><span><strong>' +
+      doneToday + '</strong> tasks done</span><span class="summary-progress" role="img" aria-label="' + doneToday + ' of ' + total + ' tasks complete"><span style="width:' +
+      (total ? Math.round(doneToday / total * 100) : 0) + '%"></span></span>';
+    renderFocus();
+    $('#upcomingPlanner').hidden = activeView !== 'upcoming';
+    if (activeView === 'upcoming') {
+      const unplanned = M.tasksFor(state, { view: 'upcoming' }).filter(t => !t.steps.length || t.steps.some(s => !s.done && !s.dueDate)).slice(0, 2);
+      $('#upcomingPlanner').innerHTML = '<h2>Give your future self a head start</h2><p class="muted">' +
+        (unplanned.length ? 'A small step with a date can make these easier to begin.' : 'Your upcoming steps have dates. Switch to Steps to see them in order.') +
+        '</p><div class="planner-actions">' + unplanned.map(t => '<button class="secondary compact" data-breakdown="' + esc(t.id) + '">🧩 ' + esc(t.title) + '</button>').join('') + '</div>';
+    }
+    const rows = prefs.mode === 'steps' ? M.stepsFor(state, currentOptions()) : M.tasksFor(state, currentOptions());
+    $('#taskHeading').textContent = prefs.mode === 'steps' ? 'Your next steps' : 'Your tasks';
+    $('#resultCount').textContent = rows.length + (prefs.mode === 'steps' ? ' steps & tasks' : ' tasks');
+    $('#taskList').innerHTML = prefs.mode === 'steps' ? stepRows(rows) : prefs.layout === 'table' ? taskTable(rows) : taskCards(rows);
+    $('#taskList').hidden = !rows.length;
+    $('#emptyState').hidden = !!rows.length;
+    $('#addTaskRow').hidden = !rows.length;
+    $('#emptyTitle').textContent = query ? 'No matches yet' : activeView === 'today' ? 'A little breathing room' : 'A clear space';
+    $('#emptyMessage').textContent = query ? 'Try a different word, or clear your search.' : activeView === 'today'
+      ? 'Nothing due here. Use “Help me choose” to plan a small step from your other tasks.'
+      : activeView === 'upcoming' ? 'No future dates yet. Add a task or schedule something from Unscheduled.' : 'Add a task whenever something comes to mind.';
+    document.querySelectorAll('[data-view]').forEach(b => { b.classList.toggle('active', b.dataset.view === activeView); b.setAttribute('aria-current', b.dataset.view === activeView ? 'page' : 'false'); });
+    document.querySelectorAll('[data-mode]').forEach(b => b.setAttribute('aria-pressed', b.dataset.mode === prefs.mode));
+    document.querySelectorAll('[data-layout]').forEach(b => b.setAttribute('aria-pressed', b.dataset.layout === prefs.layout));
+    $('#sortSelect').value = prefs.sort;
+    $('#sortSelect').disabled = prefs.mode === 'steps';
+    $('#sortSelect').title = prefs.mode === 'steps' ? 'Steps are always ordered by date and time.' : 'Sort tasks';
+    $('#showCompleted').checked = prefs.completed;
+    $('#listNav').innerHTML = state.lists.map(list => '<button class="list-item ' + (list === activeView ? 'active' : '') + '" data-list="' +
+      esc(list) + '"><span>' + listIcon(list) + '</span><span class="list-name">' + esc(list) + '</span><span class="count">' +
+      (state.tasks.filter(t => t.list === list && !t.done).length || '') + '</span></button>').join('') + '<button class="text-button mobile-add-list" data-new-list="true" aria-label="Add a list">＋</button>';
+  }
+
+  function addStepEditorRow(value = {}) {
+    const s = M.step(value), row = document.createElement('div');
+    row.className = 'step-editor-row';
+    row.dataset.id = s.id;
+    row.dataset.done = String(s.done);
+    row.innerHTML = '<label class="step-title-label"><span>Step</span><input class="step-title-input" maxlength="120" placeholder="One small, concrete action" value="' +
+      esc(s.title) + '"></label><label class="step-date-field"><span>📅 Date</span><input class="step-date-input" type="date" value="' +
+      esc(s.dueDate) + '"></label><label class="step-time-field"><span>⏰ Time</span><input class="step-time-input" type="time" value="' +
+      esc(s.dueTime) + '"></label><button type="button" class="icon-button remove-step" aria-label="Remove step">×</button>';
+    $('#stepEditor').append(row);
+    return row;
+  }
+  function abortSuggestions() {
+    suggestionEpoch++;
+    suggestionController?.abort();
+    suggestionController = null;
+    $('#suggestStepsButton').textContent = '✦ Suggest steps';
+    $('#suggestStepsButton').disabled = false;
+  }
+  function editorData() {
+    return { title: $('#taskTitle').value.trim(), list: $('#taskListSelect').value, energy: $('#taskEnergy').value,
+      dueDate: $('#taskDueDate').value, reminderDate: $('#taskReminderDate').value, reminderTime: $('#taskReminderTime').value,
+      remindersEnabled: $('#taskReminderEnabled').checked, repeat: $('#taskRepeat').value,
+      steps: [...$('#stepEditor').children].map(row => ({ id: row.dataset.id, title: row.querySelector('.step-title-input').value.trim(),
+        dueDate: row.querySelector('.step-date-input').value, dueTime: row.querySelector('.step-time-input').value, done: row.dataset.done === 'true' })) };
+  }
+  function openModal(task = null, { addStep = false, breakdown = false, focusStep = '' } = {}) {
+    abortSuggestions();
+    editingTaskId = task?.id || null;
+    modalReturnFocus = document.activeElement;
+    suggestions = [];
+    $('#taskForm').reset();
+    $('#stepEditor').replaceChildren();
+    $('#suggestionStatus').textContent = '';
+    $('#suggestionStatus').classList.remove('error');
+    $('#suggestionReview').hidden = true;
+    $('#taskListSelect').innerHTML = state.lists.map(list => '<option value="' + esc(list) + '">' + listIcon(list) + ' ' + esc(list) + '</option>').join('');
+    $('#taskTitle').value = task?.title || '';
+    $('#taskListSelect').value = task?.list || (state.lists.includes(activeView) ? activeView : 'Personal');
+    $('#taskEnergy').value = task?.energy || 'small';
+    $('#taskDueDate').value = task ? task.dueDate : activeView === 'upcoming' ? M.addDays(M.today(), 1) : activeView === 'unscheduled' ? '' : M.today();
+    $('#taskReminderDate').value = task?.reminderDate || $('#taskDueDate').value;
+    $('#taskReminderTime').value = task?.reminderTime || '';
+    $('#taskReminderEnabled').checked = !!task?.remindersEnabled;
+    $('#taskRepeat').value = task?.repeat || 'none';
+    reminderManual = !!task?.reminderDate && task.reminderDate !== task.dueDate;
+    $('#modalKicker').textContent = task ? 'MAKE A LITTLE ROOM' : 'GET IT OUT OF YOUR HEAD';
+    $('#modalTitle').textContent = task ? (breakdown ? 'Find the next small step' : 'Edit task') : 'Add a task';
+    $('#saveTaskButton').textContent = task ? 'Save changes →' : 'Add task →';
+    $('#deleteTaskButton').hidden = !task;
+    $('#taskDetails').open = !!task?.remindersEnabled || (task?.repeat && task.repeat !== 'none');
+    (task?.steps || []).forEach(addStepEditorRow);
+    let newRow;
+    if (addStep || (!task && !breakdown)) newRow = addStepEditorRow();
+    updateReminderFields();
+    editorOriginal = JSON.stringify(editorData());
+    $('#taskModal').showModal();
+    const targetRow = focusStep ? [...$('#stepEditor').children].find(r => r.dataset.id === focusStep) : newRow;
+    if (targetRow && (breakdown || focusStep)) (targetRow.querySelector(focusStep ? '.step-date-input' : '.step-title-input')).focus();
+    else if (breakdown && !task?.steps.length) $('#addStepButton').focus();
+    else $('#taskTitle').focus();
+  }
+  function closeEditor(force = false) {
+    if (!force && JSON.stringify(editorData()) !== editorOriginal && !confirm('Discard your unsaved changes?')) return;
+    abortSuggestions();
+    $('#taskModal').close();
+    editingTaskId = null;
+    modalReturnFocus?.isConnected && modalReturnFocus.focus();
+  }
+  function updateReminderFields() {
+    $('#reminderFields').hidden = !$('#taskReminderEnabled').checked;
+    const summary = [];
+    if ($('#taskReminderEnabled').checked) summary.push('On');
+    if ($('#taskRepeat').value !== 'none') summary.push(repeats[$('#taskRepeat').value]);
+    $('#detailsSummary').textContent = summary.join(' · ');
+  }
+  function saveTask(event) {
+    event.preventDefault();
+    const form = editorData();
+    if (!form.title) { $('#taskTitle').setCustomValidity('Give this task a name.'); $('#taskTitle').reportValidity(); return; }
+    if (!$('#suggestionReview').hidden) {
+      $('#suggestionStatus').textContent = 'Add the selected suggestions, or dismiss them, before saving.';
+      $('#acceptSuggestions').focus();
+      return;
+    }
+    const task = editingTaskId && taskById(editingTaskId);
+    const savedId = task?.id || M.id();
+    const data = { ...form, steps: form.steps.filter(s => s.title).map(s => {
+      const old = task?.steps.find(v => v.id === s.id);
+      return { ...s, reminderNotifiedAt: old && old.dueDate === s.dueDate && old.dueTime === s.dueTime ? old.reminderNotifiedAt : null };
+    }), reminderDate: form.remindersEnabled ? form.reminderDate : '', reminderTime: form.remindersEnabled ? form.reminderTime : '' };
+    const ok = change(() => {
+      if (task) {
+        const reminderChanged = task.reminderDate !== data.reminderDate || task.reminderTime !== data.reminderTime || task.remindersEnabled !== data.remindersEnabled;
+        Object.assign(task, data);
+        if (reminderChanged) { task.reminderNotifiedAt = null; task.snoozedUntil = null; task.steps.forEach(s => s.reminderNotifiedAt = null); }
+      } else state.tasks.unshift({ ...data, id: savedId, done: false, priority: Date.now(), reminderNotifiedAt: null });
+    }, task ? 'Changes saved.' : 'Captured. One less thing to hold in your head.');
+    if (ok) {
+      closeEditor(true);
+      const saved = taskById(savedId);
+      if (query && !M.matchesSearch(saved, query)) { query = ''; $('#searchInput').value = ''; }
+      if (!M.taskMatches(saved, activeView)) setView(state.lists.includes(activeView) ? saved.list :
+        M.taskMatches(saved, 'today') ? 'today' : M.taskMatches(saved, 'upcoming') ? 'upcoming' : 'unscheduled');
+      else render();
+      if (form.remindersEnabled && 'Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission().catch(() => {});
+      }
+    }
+  }
+  function deleteTask() {
+    const task = taskById(editingTaskId);
+    if (!task) return;
+    if (change(() => { state.tasks = state.tasks.filter(t => t.id !== task.id); }, 'Task deleted.')) closeEditor(true);
+  }
+  function toggleStep(task, s, checked) {
+    if (!change(() => { s.done = checked; }, checked ? 'One step done.' : 'Step reopened.')) return;
+    if (checked && !task.done && task.steps.length && task.steps.every(step => step.done)) {
+      completionTaskId = task.id;
+      $('#completionMessage').textContent = 'Is “' + task.title + '” finished, or is there more to do?';
+      $('#completionDialog').showModal();
+    }
+  }
+  function chooseTask() {
+    const chosen = M.choose(state, M.today(), chosenId);
+    chosenId = chosen?.task.id || null;
+    renderFocus();
+  }
+  function setView(view) {
+    activeView = view; focused = false; document.body.classList.remove('focus-active');
+    $('#focusButton').textContent = '◎ Focus mode'; $('#focusButton').setAttribute('aria-pressed', 'false'); render();
+  }
+
+  function showSuggestionError(message, canConfigure = false) {
+    const status = $('#suggestionStatus');
+    status.textContent = message;
+    status.classList.add('error');
+    if (canConfigure) {
+      const button = document.createElement('button');
+      button.type = 'button'; button.className = 'text-button'; button.textContent = 'AI settings';
+      button.addEventListener('click', openSettings); status.append(button);
+    }
+  }
+  async function suggestSteps() {
+    if (suggestionController) { abortSuggestions(); $('#suggestionStatus').textContent = 'Suggestions canceled. Your steps are unchanged.'; return; }
+    const title = $('#taskTitle').value.trim();
+    if (!title) { showSuggestionError('Add a task name first.'); $('#taskTitle').focus(); return; }
+    if (!localServer) { showSuggestionError('Open the app using start.command to connect AI. Your tasks still work here.', true); return; }
+    if (Date.now() < cooldownUntil) { showSuggestionError('Please wait ' + Math.ceil((cooldownUntil - Date.now()) / 1000) + ' seconds before trying again.'); return; }
+    abortSuggestions();
+    const epoch = suggestionEpoch, controller = new AbortController();
+    suggestionController = controller;
+    const timer = setTimeout(() => controller.abort(), 35000);
+    $('#suggestStepsButton').textContent = 'Cancel';
+    $('#suggestionStatus').classList.remove('error');
+    $('#suggestionStatus').textContent = 'Finding a few small, concrete steps…';
+    $('#suggestionReview').hidden = true;
+    const current = editorData();
+    try {
+      const response = await fetch('/api/suggest-subtasks', { method: 'POST', signal: controller.signal,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, list: current.list, energy: current.energy, existingSteps: current.steps.map(s => s.title).filter(Boolean) }) });
+      const data = await response.json();
+      if (epoch !== suggestionEpoch || !$('#taskModal').open) return;
+      if (!response.ok) {
+        if (data.retryAfter) cooldownUntil = Date.now() + data.retryAfter * 1000;
+        showSuggestionError(data.error || 'Suggestions are unavailable right now.', !!data.needsSetup);
+        return;
+      }
+      if (!Array.isArray(data.steps)) throw new Error('The service returned an unreadable breakdown.');
+      const existing = new Set(current.steps.map(s => s.title.toLocaleLowerCase()));
+      suggestions = [...new Set(data.steps.filter(s => typeof s === 'string').map(s => s.trim()).filter(Boolean))].filter(s => !existing.has(s.toLocaleLowerCase())).slice(0, 6);
+      if (!suggestions.length) { $('#suggestionStatus').textContent = 'No extra steps needed. You can add your own below.'; return; }
+      $('#suggestionList').innerHTML = suggestions.map((s, i) => '<label class="suggestion-line"><input type="checkbox" checked aria-label="Include suggestion ' +
+        (i + 1) + '"><input type="text" maxlength="120" value="' + esc(s) + '" aria-label="Suggested step ' + (i + 1) + '"></label>').join('');
+      $('#suggestionReview').hidden = false;
+      $('#suggestionStatus').textContent = 'Review these suggestions. They’re added only when you choose “Add selected steps”.';
+    } catch (error) {
+      if (epoch !== suggestionEpoch || !$('#taskModal').open) return;
+      showSuggestionError(error.name === 'AbortError' ? 'That took too long. Try again when you’re ready.' : (error.message || 'Could not connect to AI. Check the local server.'));
+    } finally {
+      clearTimeout(timer);
+      if (epoch === suggestionEpoch) { suggestionController = null; $('#suggestStepsButton').textContent = '✦ Suggest steps'; }
+    }
+  }
+  function acceptSuggestions() {
+    const values = [...$('#suggestionList').querySelectorAll('.suggestion-line')].filter(row => row.querySelector('input[type=checkbox]').checked)
+      .map(row => row.querySelector('input[type=text]').value.trim()).filter(Boolean);
+    const existing = new Set(editorData().steps.map(s => s.title.toLocaleLowerCase()));
+    const additions = values.filter(value => { const key = value.toLocaleLowerCase(); if (existing.has(key)) return false; existing.add(key); return true; });
+    [...$('#stepEditor').children].filter(row => !row.querySelector('.step-title-input').value.trim()).forEach(row => row.remove());
+    additions.forEach(title => addStepEditorRow({ title }));
+    $('#suggestionReview').hidden = true;
+    $('#suggestionStatus').textContent = additions.length ? additions.length + ' steps added. Give them dates if helpful, then save your task.' : 'No steps added. Your existing steps are unchanged.';
+  }
+
+  async function refreshApiStatus() {
+    if (!localServer) return;
+    try {
+      const response = await fetch('/api/status', { cache: 'no-store' });
+      if (!response.ok) throw new Error('No server');
+      const data = await response.json();
+      apiStatus = { available: true, configured: !!data.configured, model: data.model };
+    } catch { apiStatus = { available: false, configured: false }; }
+    $('#aiIndicator').classList.toggle('configured', apiStatus.configured);
+    $('#aiIndicator').title = apiStatus.configured ? 'AI key configured' : 'AI setup available in Settings';
+  }
+  async function openSettings() {
+    $('#settingsStatus').textContent = '';
+    $('#backupStatus').textContent = '';
+    $('#apiKeyInput').value = '';
+    if (!$('#settingsDialog').open) $('#settingsDialog').showModal();
+    await refreshApiStatus();
+    $('#aiConnectionStatus').textContent = !localServer ? 'Open the app with start.command to configure AI.' : !apiStatus.available
+      ? 'The local AI server is unavailable. Restart with start.command.' : apiStatus.configured
+      ? 'API key configured. Availability is checked when you request suggestions.' : 'AI is not set up yet. Add an API key below, or keep adding steps yourself.';
+    $('#aiSettingsForm').hidden = !localServer || !apiStatus.available;
+    const permission = 'Notification' in window ? Notification.permission : 'unsupported';
+    $('#notificationStatus').textContent = permission === 'granted' ? 'Browser notifications are enabled. Keep SlashTasks open to receive reminders.'
+      : permission === 'denied' ? 'Notifications are blocked in browser settings. In-app reminders still appear while SlashTasks is open.'
+      : permission === 'unsupported' ? 'This browser supports in-app reminders only.' : 'Allow browser notifications to see reminders while this tab is in the background.';
+    $('#enableNotifications').hidden = permission !== 'default';
+  }
+  async function saveApiKey(event) {
+    event.preventDefault();
+    const key = $('#apiKeyInput').value.trim();
+    if (!key) { $('#settingsStatus').textContent = 'Paste an OpenAI API key first.'; return; }
+    $('#saveApiKey').disabled = true;
+    try {
+      const response = await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ apiKey: key }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Could not save the API key.');
+      $('#apiKeyInput').value = '';
+      await refreshApiStatus();
+      $('#aiConnectionStatus').textContent = 'Key saved on this Mac. Try suggesting steps to check API access.';
+      $('#settingsStatus').textContent = 'Saved. No server restart needed.';
+    } catch (error) { $('#settingsStatus').textContent = error.message; }
+    finally { $('#saveApiKey').disabled = false; }
+  }
+  function exportTasks() {
+    const text = storageLocked && rawRecovery ? rawRecovery : JSON.stringify({ ...state, exportedAt: new Date().toISOString() }, null, 2);
+    const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+    const link = document.createElement('a'); link.href = url; link.download = 'slashtasks-' + M.today() + '.json'; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    recoveryExported = true;
+    $('#backupStatus').textContent = storageLocked ? 'Recovery copy downloaded. You can now import a valid backup.' : 'Backup downloaded. It includes tasks and lists only.';
+  }
+  async function importTasks(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    try {
+      if (file.size > 5 * 1024 * 1024) throw new Error('Please choose a task backup smaller than 5 MB.');
+      const raw = JSON.parse(await file.text());
+      if (!Array.isArray(raw.tasks) || !raw.tasks.every(t => t && typeof t.title === 'string' && t.title.trim())) throw new Error('This file does not look like a SlashTasks task backup.');
+      const incoming = M.normalize(raw);
+      const added = incoming.tasks.filter(t => !state.tasks.some(existing => existing.id === t.id));
+      if (storageLocked) {
+        if (!recoveryExported) throw new Error('Export your recovery copy before restoring a valid backup.');
+        if (!confirm('Replace the unreadable saved data with this backup? Your recovery file has already been downloaded.')) return;
+        const original = state; state = incoming; storageLocked = false;
+        if (!persist()) { state = original; storageLocked = true; throw new Error('The browser still cannot save. Your recovery copy is available.'); }
+        rawRecovery = null; undoState = null; render();
+        $('#backupStatus').textContent = 'Backup restored. ' + incoming.tasks.length + ' tasks are ready.';
+        return;
+      }
+      if (change(() => { state.tasks.push(...added); state.lists = [...new Set([...state.lists, ...incoming.lists])]; }, 'Backup merged.')) {
+        $('#backupStatus').textContent = added.length + ' tasks added. Existing tasks were kept; matching task IDs were skipped.';
+      }
+    } catch (error) { $('#backupStatus').textContent = error.message || 'Could not read that backup.'; }
+    finally { event.target.value = ''; }
+  }
+  function checkReminders() {
+    const alerts = M.reminders(state);
+    if (!alerts.length) return;
+    const stamp = new Date().toISOString();
+    for (const { task, step } of alerts) {
+      (step || task).reminderNotifiedAt = stamp;
+      if (!step) task.snoozedUntil = null;
+      if ('Notification' in window && Notification.permission === 'granted') {
+        try { new Notification(step ? 'Step for ' + task.title : 'SlashTasks reminder', { body: step?.title || task.title }); } catch { /* The in-app reminder remains available. */ }
+      }
+    }
+    persist();
+    toast(alerts.length === 1 ? '⏰ ' + (alerts[0].step?.title || alerts[0].task.title) : '⏰ ' + alerts.length + ' reminders are ready. Check Today.');
+  }
+
+  document.addEventListener('click', event => {
+    const target = event.target.closest('button, a');
+    if (!target) return;
+    if (target.dataset.newList) { $('#listForm').reset(); $('#listDialog').showModal(); $('#newListName').focus(); return; }
+    if (target.dataset.view) { setView(target.dataset.view); return; }
+    if (target.dataset.list) { setView(target.dataset.list); return; }
+    if (target.dataset.mode) { prefs.mode = target.dataset.mode; savePrefs(); render(); return; }
+    if (target.dataset.layout) { prefs.layout = target.dataset.layout; savePrefs(); render(); return; }
+    if (target.dataset.close) { $('#' + target.dataset.close).close(); return; }
+    if (target.dataset.action === 'home') { event.preventDefault(); setView('today'); return; }
+    if (target.dataset.delete) {
+      const id = target.dataset.delete;
+      change(() => { state.tasks = state.tasks.filter(t => t.id !== id); }, 'Task deleted.'); return;
+    }
+    if (target.dataset.tomorrow) {
+      const task = taskById(target.dataset.tomorrow);
+      if (task) change(() => {
+        const previous = task.dueDate;
+        task.dueDate = M.addDays(M.today(), 1);
+        if (task.reminderDate === previous) { task.reminderDate = task.dueDate; task.reminderNotifiedAt = null; }
+      }, 'Moved to tomorrow.'); return;
+    }
+    if (target.dataset.snooze) {
+      const task = taskById(target.dataset.snooze);
+      if (task) change(() => { task.snoozedUntil = new Date(Date.now() + 600000).toISOString(); task.reminderNotifiedAt = null; }, 'Reminder snoozed for 10 minutes.'); return;
+    }
+    if (target.dataset.toggleSteps) { const id = target.dataset.toggleSteps; expanded.has(id) ? expanded.delete(id) : expanded.add(id); render(); return; }
+    if (target.dataset.completeTask) { const task = taskById(target.dataset.completeTask); if (task) change(() => M.toggleTask(state, task), task.done ? 'Task reopened.' : 'Task complete. Nice work.'); return; }
+    const taskId = target.dataset.editTask || target.dataset.breakdown;
+    if (taskId) {
+      const task = taskById(taskId); if (!task) return;
+      const breakdown = !!target.dataset.breakdown || !!target.dataset.breakdownFocus;
+      openModal(task, { addStep: breakdown && !task.steps.some(s => !s.done), breakdown, focusStep: target.dataset.focusStep || '' });
+    }
+  });
+  $('#taskList').addEventListener('change', event => {
+    const input = event.target.closest('[data-step]'); if (!input) return;
+    const task = taskById(input.dataset.task), s = task?.steps.find(v => v.id === input.dataset.step);
+    if (s) toggleStep(task, s, input.checked);
+  });
+  ['sideAdd', 'emptyAdd', 'addTaskRow'].forEach(id => $('#' + id).addEventListener('click', () => openModal()));
+  $('#closeModal').addEventListener('click', () => closeEditor());
+  $('#taskModal').addEventListener('cancel', event => { event.preventDefault(); closeEditor(); });
+  $('#taskForm').addEventListener('submit', saveTask);
+  $('#taskTitle').addEventListener('input', () => {
+    $('#taskTitle').setCustomValidity('');
+    if (suggestionController || !$('#suggestionReview').hidden) {
+      abortSuggestions(); $('#suggestionReview').hidden = true;
+      $('#suggestionStatus').textContent = 'Task name changed. Ask for fresh suggestions when you’re ready.';
+    }
+  });
+  $('#taskDueDate').addEventListener('input', () => { if (!reminderManual) $('#taskReminderDate').value = $('#taskDueDate').value; });
+  $('#taskReminderDate').addEventListener('input', () => { reminderManual = true; });
+  $('#taskReminderEnabled').addEventListener('change', updateReminderFields);
+  $('#taskRepeat').addEventListener('change', updateReminderFields);
+  $('#addStepButton').addEventListener('click', () => addStepEditorRow().querySelector('input').focus());
+  $('#stepEditor').addEventListener('click', event => { const remove = event.target.closest('.remove-step'); if (remove) remove.closest('.step-editor-row').remove(); });
+  $('#suggestStepsButton').addEventListener('click', suggestSteps);
+  $('#acceptSuggestions').addEventListener('click', acceptSuggestions);
+  $('#dismissSuggestions').addEventListener('click', () => { $('#suggestionReview').hidden = true; $('#suggestionStatus').textContent = 'Suggestions dismissed. Your steps are unchanged.'; });
+  $('#deleteTaskButton').addEventListener('click', deleteTask);
+  $('#completeParent').addEventListener('click', () => {
+    const task = taskById(completionTaskId); $('#completionDialog').close();
+    if (task && !task.done) change(() => M.toggleTask(state, task), 'Task complete. Nice work.');
+  });
+  $('#addMoreSteps').addEventListener('click', () => { $('#completionDialog').close(); const task = taskById(completionTaskId); if (task) openModal(task, { addStep: true, breakdown: true }); });
+  $('#calloutPick').addEventListener('click', chooseTask);
+  $('#focusButton').addEventListener('click', () => {
+    focused = !focused; document.body.classList.toggle('focus-active', focused);
+    $('#focusButton').textContent = focused ? '× Exit focus' : '◎ Focus mode'; $('#focusButton').setAttribute('aria-pressed', String(focused));
+    if (focused && !chosenId) chooseTask(); render();
+  });
+  $('#searchInput').addEventListener('input', event => { query = event.target.value; render(); });
+  $('#sortSelect').addEventListener('change', event => { prefs.sort = event.target.value; savePrefs(); render(); });
+  $('#showCompleted').addEventListener('change', event => { prefs.completed = event.target.checked; savePrefs(); render(); });
+  $('#addList').addEventListener('click', () => { $('#listForm').reset(); $('#listDialog').showModal(); $('#newListName').focus(); });
+  $('#listForm').addEventListener('submit', event => {
+    event.preventDefault(); const name = $('#newListName').value.trim();
+    if (!name) return;
+    if (['today', 'upcoming', 'unscheduled', 'all'].includes(name.toLowerCase()) || state.lists.some(v => v.toLowerCase() === name.toLowerCase())) {
+      $('#newListName').setCustomValidity('Choose a different name. This one is already used.'); $('#newListName').reportValidity(); return;
+    }
+    if (change(() => state.lists.push(name), 'List added.')) { $('#listDialog').close(); setView(name); }
+  });
+  $('#newListName').addEventListener('input', () => $('#newListName').setCustomValidity(''));
+  $('#settingsButton').addEventListener('click', openSettings);
+  $('#aiSettingsForm').addEventListener('submit', saveApiKey);
+  $('#settingsDialog').addEventListener('close', () => { $('#apiKeyInput').value = ''; });
+  $('#exportTasks').addEventListener('click', exportTasks);
+  $('#importTasks').addEventListener('click', () => $('#importFile').click());
+  $('#importFile').addEventListener('change', importTasks);
+  $('#enableNotifications').addEventListener('click', async () => { if ('Notification' in window) { await Notification.requestPermission(); openSettings(); } });
+  $('#undoButton').addEventListener('click', () => {
+    if (!undoState) return;
+    const current = state; state = undoState;
+    if (!persist()) { state = current; return; }
+    undoState = null; render(); toast('Undone.');
+  });
+  document.addEventListener('keydown', event => {
+    const typing = event.target.matches?.('input, textarea, select, [contenteditable]');
+    const dialog = [...document.querySelectorAll('dialog[open]')].at(-1);
+    if (event.key === 'Enter' && $('#taskModal').open && dialog?.id === 'taskModal' && !event.shiftKey &&
+        !event.target.closest('button, select, textarea, #suggestionReview')) {
+      event.preventDefault(); $('#taskForm').requestSubmit(); return;
+    }
+    if (dialog || typing || event.metaKey || event.ctrlKey || event.altKey) return;
+    if (event.key.toLowerCase() === 'n') { event.preventDefault(); openModal(); }
+    if (event.key === '/') { event.preventDefault(); $('#searchInput').focus(); }
+  });
+  // Never leave a request alive after its editor has closed.
+  $('#taskModal').addEventListener('close', abortSuggestions);
+  $('#launchNotice').hidden = localServer;
+  render();
+  refreshApiStatus();
+  checkReminders();
+  let lastDay = M.today();
+  setInterval(() => {
+    checkReminders();
+    if (lastDay !== M.today()) { lastDay = M.today(); render(); }
+  }, 15000);
+  window.addEventListener('focus', () => { checkReminders(); if (!$('#taskModal').open) render(); });
+})();
