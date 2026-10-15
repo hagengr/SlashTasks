@@ -64,14 +64,19 @@ async function suggestSubtasks(request, response) {
       })
     });
   } catch {
+    console.error('OpenAI request failed before receiving a response. Check network access and try again.');
     return sendJson(response, 502, { error: 'Could not reach the suggestion service. Check your connection and try again.' });
   }
 
   const result = await apiResponse.json().catch(() => ({}));
   if (!apiResponse.ok) {
-    const message = apiResponse.status === 401 || apiResponse.status === 403
-      ? 'The OpenAI API key was rejected. Check OPENAI_API_KEY.'
-      : 'The suggestion service could not make a breakdown right now.';
+    const code = result.error?.code || result.error?.type || `http_${apiResponse.status}`;
+    console.error(`OpenAI API error (${apiResponse.status}): ${code}`);
+    let message = 'The suggestion service could not make a breakdown right now.';
+    if (apiResponse.status === 401 || apiResponse.status === 403) message = 'The OpenAI API key was rejected or lacks access. Check the key, then restart the server.';
+    else if (apiResponse.status === 429 && code === 'insufficient_quota') message = 'OpenAI API usage is out of quota. Check the API project’s billing and limits.';
+    else if (apiResponse.status === 429) message = 'OpenAI is rate limiting requests. Wait a moment and try again.';
+    else if (apiResponse.status === 400 || apiResponse.status === 404) message = `OpenAI rejected this request (${code}). Check the configured model (${model}) and try again.`;
     return sendJson(response, 502, { error: message });
   }
   const outputText = result.output?.flatMap(item => item.content || []).find(item => item.type === 'output_text')?.text;
