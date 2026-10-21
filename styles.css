@@ -293,3 +293,16 @@ label small { font-weight: 400; }
 
 .mobile-add-list { display: none; }
 @media (max-width: 740px) { .mobile-add-list { display: inline-block; padding: 2px 7px; font-size: 16px; } }
+
+.auth-panel { max-width: 430px; margin: 9vh auto; padding: 30px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+.auth-panel .brand { margin-bottom: 35px; }
+.auth-panel h1 { font-size: 30px; margin-bottom: 12px; }
+.auth-panel form { margin-top: 22px; display: grid; gap: 13px; }
+.auth-panel .primary { justify-self: start; }
+.sync-bar { display: flex; align-items: center; justify-content: space-between; gap: 15px; font-size: 11px; color: var(--muted); margin-bottom: 12px; }
+.sync-bar .error { color: var(--danger); }
+.sync-bar button { font-size: 11px; }
+#syncConflict article { padding: 12px 0; }
+.conflict-values { display: grid; gap: 3px; font-size: 12px; margin: 7px 0; }
+#profileForm { display: grid; gap: 12px; margin-top: 15px; }
+#profileForm .secondary { justify-self: start; }

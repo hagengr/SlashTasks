@@ -7,7 +7,7 @@ const { spawn } = require('node:child_process');
 function parseEnv(text) {
   const values = {};
   for (const line of text.split(/\r?\n/)) {
-    const match = line.match(/^\s*(?:export\s+)?(OPENAI_API_KEY|OPENAI_MODEL)\s*=\s*(.*?)\s*$/);
+    const match = line.match(/^\s*(?:export\s+)?(OPENAI_API_KEY|OPENAI_MODEL|SUPABASE_URL|SUPABASE_PUBLISHABLE_KEY|SLASHTASKS_AI_ENABLED)\s*=\s*(.*?)\s*$/);
     if (!match) continue;
     let value = match[2];
     if (value.startsWith('"')) {
@@ -24,7 +24,10 @@ function loadConfiguration(root, env) {
   catch (error) { if (error.code !== 'ENOENT') console.error('Could not read local AI settings. Check .env file permissions.'); }
   return {
     apiKey: file.OPENAI_API_KEY || env.OPENAI_API_KEY || '',
-    model: env.OPENAI_MODEL || file.OPENAI_MODEL || 'gpt-4o-mini'
+    model: env.OPENAI_MODEL || file.OPENAI_MODEL || 'gpt-4o-mini',
+    supabaseUrl: env.SUPABASE_URL || file.SUPABASE_URL || '',
+    supabaseKey: env.SUPABASE_PUBLISHABLE_KEY || file.SUPABASE_PUBLISHABLE_KEY || '',
+    aiEnabled: (env.SLASHTASKS_AI_ENABLED || file.SLASHTASKS_AI_ENABLED) === 'true'
   };
 }
 function saveKey(root, key) {
@@ -99,6 +102,10 @@ function createApp({ root = __dirname, env = process.env, fetchImpl = globalThis
     '/index.html': ['index.html', 'text/html; charset=utf-8'],
     '/styles.css': ['styles.css', 'text/css; charset=utf-8'],
     '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
+    '/cloud-config.js': ['cloud-config.js','text/javascript; charset=utf-8'],
+    '/cloud-sync.js': ['cloud-sync.js','text/javascript; charset=utf-8'],
+    '/cloud.js': ['cloud.js','text/javascript; charset=utf-8'],
+    '/vendor/supabase-2.118.0.js': ['vendor/supabase-2.118.0.js','text/javascript; charset=utf-8'],
     '/task-model.js': ['task-model.js', 'text/javascript; charset=utf-8'],
     '/favicon.ico': ['favicon.svg', 'image/svg+xml'],
     '/favicon.svg': ['favicon.svg', 'image/svg+xml']
@@ -173,6 +180,7 @@ function createApp({ root = __dirname, env = process.env, fetchImpl = globalThis
       if (!['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)) return sendJson(response, 403, { error: 'Use the localhost address shown when starting SlashTasks.' });
       if (request.headers.origin && request.headers.origin !== url.origin) return sendJson(response, 403, { error: 'Open SlashTasks from its local server to use this feature.' });
       if (url.pathname.startsWith('/api/')) {
+        if (request.method === 'GET' && url.pathname === '/api/cloud-config') return sendJson(response,200,{url:config.supabaseUrl,publishableKey:config.supabaseKey,aiEnabled:config.aiEnabled});
         if (request.method === 'GET' && url.pathname === '/api/status') return sendJson(response, 200, { configured: !!config.apiKey, model: config.model });
         if (request.method !== 'POST') return sendJson(response, 405, { error: 'Method not allowed.' });
         if (!request.headers['content-type']?.toLowerCase().startsWith('application/json')) return sendJson(response, 415, { error: 'Use application/json for this request.' });
@@ -194,7 +202,7 @@ function createApp({ root = __dirname, env = process.env, fetchImpl = globalThis
         if (error) { response.writeHead(404); return response.end('Not found'); }
         response.writeHead(200, {
           'Content-Type': asset[1], 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff',
-          'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+          'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://*.supabase.co wss://*.supabase.co; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
         });
         response.end(request.method === 'HEAD' ? undefined : data);
       });
@@ -213,7 +221,7 @@ if (require.main === module) {
   server.listen(port, '127.0.0.1', () => {
     const address = 'http://127.0.0.1:' + port;
     console.log('SlashTasks is ready: ' + address);
-    console.log('Keep this window open. Configure optional AI in Settings. Press Control+C to stop.');
+    console.log('Keep this window open. Cloud connection settings come from .env. Press Control+C to stop.');
     if (process.argv.includes('--open') && process.platform === 'darwin') spawn('open', [address], { stdio: 'ignore' }).on('error', () => {});
   });
 }

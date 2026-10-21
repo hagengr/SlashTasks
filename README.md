@@ -1,84 +1,73 @@
 # SlashTasks
 
-A calmer place to capture tasks, plan small steps, and find one thing to start. Built around quick capture, manageable next actions, and a little less friction.
+A calmer place to capture tasks, plan small steps, and find one thing to start.
 
-## Open the app on this Mac
+This revision connects the web app to Supabase Auth and Postgres. Accounts sign in with an email code, get a profile, and own their tasks, steps, and lists. New accounts start empty. No browser data is migrated automatically.
 
-1. Stop an older SlashTasks server with **Control+C** if one is running.
-2. Double-click **start.command** in the project folder.
-3. Keep its Terminal window open. SlashTasks opens at **http://127.0.0.1:4173**.
+**Deployment status:** the cloud implementation is ready to configure; a live Supabase project and public website have not been provisioned by this revision. Follow [Cloud setup](docs/cloud-setup.md) before opening this version for use. The working local prototype remains on `main` while this cloud revision is reviewed.
 
-The launcher uses an installed Node.js runtime, or the runtime already bundled with Codex on this Mac. It does not install dependencies. On another computer, install Node.js 18 or newer and run:
+## What you can do
 
-```sh
-node server.js
-```
+- Use **Today**, **Upcoming**, **Unscheduled**, or **All tasks**. Today includes overdue work and steps due today, even when the parent task is due later.
+- Switch between **Tasks / Steps** and **List / Table**. Both task layouts expand steps inline; the Steps view links back to the parent task.
+- Use **Help me choose** for an inline starting suggestion, or plan other captured work when today is clear.
+- Click a task title to edit. **N** creates a task, **/** opens search, **Enter** saves the task editor, and **Escape** closes it.
+- Give steps their own dates and times. Finishing the last step offers to complete the task or add more steps.
+- Set a display name and default reminder time in your profile.
+- Edit while disconnected after the app has loaded. Changes are saved in an account-specific IndexedDB journal before the app confirms the save. They upload when connectivity returns.
+- See pending saves, retry sync, and resolve conflicts explicitly. Changes to different fields merge; competing changes to the same field require a choice.
+- Export a task backup, including changes still waiting to sync. Import merges tasks by ID and keeps existing tasks when IDs match.
 
-Tasks are stored in this browser, under the same `slashtasks-v1` key as earlier versions. Existing task IDs, steps, recurrence links, and reminder history are retained.
+## Run locally against your cloud project
 
-## A simpler daily flow
+1. Complete the database and email setup in [Cloud setup](docs/cloud-setup.md).
+2. Copy `.env.example` to `.env` and set `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY`.
+3. Run `node server.js`, or double-click `start.command` on this Mac.
+4. Open **http://127.0.0.1:4173**, enter your email, then enter the emailed code.
 
-- **Today** includes overdue work and steps due today, even when their parent task is due later.
-- **Upcoming** shows future dates and offers a little planning help.
-- **Unscheduled** gives undated tasks a home. **All tasks** shows everything.
-- **Tasks / Steps** changes what you organize by; **List / Table** changes the layout. Both use explicit selected states.
-- Both task layouts expand steps inline. The global Steps view orders steps by date and time, with a link and matching color to the parent task.
-- **Help me choose** gives an inline suggestion. When nothing is due, it helps you plan other captured work.
-- Click a task title to edit it. **N** creates a task; **/** opens search; **Enter** saves the editor; **Escape** closes it.
-- Dates and times can be set on individual steps. A step without its own date appears under its parent task’s date and is labeled **Task: [date]**.
-- Finishing the last step asks whether to complete the parent or add more steps.
-- Complete, delete, and reschedule actions offer **Undo**. Completed work can be shown with the toolbar checkbox.
+The launcher uses Node.js on your PATH or the runtime bundled with Codex on this Mac. Node 18 or newer is required. Frontend dependencies are vendored, so running the app needs no package installation. Opening `index.html` directly is not the supported launch path.
 
-## AI suggestions, without Terminal key setup
+The browser receives the project URL and public publishable key. Database policies and authenticated RPCs protect each account. A service-role or Supabase secret key must never be placed in frontend configuration.
 
-Open **Settings & backup → AI step suggestions**, paste an OpenAI API key, and choose **Save API key**. No server restart is needed.
+## Optional AI suggestions
 
-The key is written to a private `.env` file in the project folder with owner-only permissions. That file is ignored by Git and is never served as a web asset or included in task backups. A saved key takes precedence over a shell-provided key so replacement from Settings survives restarts.
+Cloud suggestions run through the authenticated `suggest-subtasks` Supabase Edge Function. The OpenAI key is an Edge Function secret, configured by the operator, and is never requested in the web app. Task saving and manual steps work with AI disabled.
 
-When you choose **Suggest steps** in a new or existing task:
+Suggestions are staged for review: select and edit them, choose **Add selected steps**, then save the task. Requests send the task title, list, energy, and existing step titles. Output is validated and duplicates are removed. Closing the editor or changing the task title cancels stale requests. The handler uses `store: false`, enforces per-account request limits, and does not automatically retry paid requests.
 
-1. The server sends that task’s name, list, energy, and existing step titles to OpenAI.
-2. Suggestions appear in a separate review area.
-3. Select and edit the steps you want, then choose **Add selected steps**.
-4. Set dates or times if useful, then save the task.
+See [Cloud setup](docs/cloud-setup.md#optional-ai) for deployment and secrets. The old localhost AI proxy remains a development utility; it is not included in the cloud release.
 
-You can cancel a request. Closing the editor or changing the task name invalidates pending results. Suggestions are never silently added to a different task. Model output is validated and duplicates are removed.
+## Reminders and offline use
 
-AI is optional. API requests require the project to have access and available quota. Billing, credit, rate-limit, network, timeout, and model errors are explained in the app. Temporary limits respect OpenAI’s retry interval; the app does not automatically retry paid requests.
+Reminders are enabled per task. Selecting a due date prefills the reminder date with no time. A blank time uses the profile's default, initially 9:00 AM, in the current device's timezone. Dated incomplete steps use their own time, then the task's time, then the profile default.
 
-Advanced: `OPENAI_API_KEY` and `OPENAI_MODEL` environment variables are supported. The default model remains `gpt-4o-mini`. The API uses the Responses endpoint with structured output and `store: false`.
+Reminders currently require the app to remain open. Notification delivery history stays on each device. Background push, native iOS/Watch notifications, and installing an offline app shell are future work. A loaded tab can edit offline; opening a fresh tab without internet is not guaranteed.
 
-## Reminders
-
-Reminders are explicitly enabled per task under **Reminders & repeat**. Selecting a due date prefills the reminder date; the time starts blank. A blank reminder time uses **9:00 AM in the browser’s local timezone**.
-
-Dated, incomplete steps fire their own reminders when the parent’s reminders are enabled. A step’s own time is used first, then the task’s reminder time, then 9:00 AM. Undated steps do not fire separate reminders.
-
-Keep the app open to receive reminders. Allow browser notifications in Settings if you want them while the tab is in the background. This prototype does not yet provide push notifications or cross-device sync.
-
-## Backups and moving from the old file version
-
-Use **Settings & backup → Export backup** to download tasks and lists. Import merges task IDs and keeps current tasks when an ID matches.
-
-A browser treats `file://`, `http://localhost:4173`, and `http://127.0.0.1:4173` as different storage locations. If your tasks were in the old file version, open that same `index.html` file, export a backup, then import it into the running app. Prefer the launcher's `127.0.0.1` address consistently.
-
-Opening `index.html` directly still supports task management and backups. AI settings and suggestions require the local server. Unreadable saved data is left untouched; Settings can export a recovery copy before restoring a valid backup.
+Signing out hides that account's data and keeps its pending journal on that browser for the next sign-in to the same account. The local cache is not encrypted. Clearing browser storage removes unsynced changes. Wait for **Saved to cloud**, or export a backup, before clearing it.
 
 ## Development
 
-No package installation or build step is needed. Use `npm start`, `npm test`, or `npm run check` when Node/npm are installed; the same checks can run directly with Node:
-
 ```sh
-node --test tests/*.test.cjs
-node --check app.js
-node --check task-model.js
-node --check server.js
+npm ci
+npm run check
+npm test
+npm run build
 ```
 
-- `task-model.js`: shared, independently tested rules for dates, filtering, selection, recurrence, reminders, and legacy data.
-- `app.js`: task views, editor, staged AI review, settings, and backups.
-- `server.js`: localhost-only static server and OpenAI proxy, persistent private settings, input validation, and error handling.
-- `index.html` and `styles.css`: responsive UI, native modal focus handling, accessible labels, and one consolidated stylesheet.
-- `tests/`: state regressions, HTML/controller contracts, and HTTP endpoint checks with mocked OpenAI responses. The suite makes no paid API calls.
+The build requires public Supabase configuration and creates a static `dist/` directory for Cloudflare Pages. It uses a strict file allowlist and excludes `.env`, the local server, tests, and private keys.
 
-This is a local prototype. Publishing the repository to GitHub does not deploy its AI server.
+The existing regression suite covers task behavior, UI element contracts, the local HTTP server, authenticated AI handling, the sync journal, and the migration against embedded PostgreSQL. Tests make no live Supabase or paid OpenAI calls. Database cases use the pinned PGlite development dependency. See [Sync protocol](docs/sync-protocol.md) for conflict and retry rules.
+
+### Source map
+
+| File | Purpose |
+| --- | --- |
+| `app.js`, `index.html`, `styles.css` | Task views, editor, staged AI review, profile, and backups |
+| `task-model.js` | Date filtering, reminders, recurrence, selection, and normalization |
+| `cloud.js` | Supabase authentication, account lifecycle, status UI, realtime hints |
+| `cloud-sync.js` | Durable journal, field patches, retry, acknowledgement, conflict resolution |
+| `supabase/migrations/` | Schema, ownership policies, atomic sync RPCs, AI quota |
+| `supabase/functions/suggest-subtasks/` | Authenticated cloud AI handler |
+| `scripts/build-cloud.cjs` | Static release builder and security headers |
+| `server.js`, `start.command` | Local development launcher and configuration |
+| `vendor/` | Official Supabase JavaScript SDK 2.118.0 and its MIT license |

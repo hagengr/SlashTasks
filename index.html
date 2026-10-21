@@ -8,12 +8,23 @@
   <title>SlashTasks · One step at a time</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
+  <script src="cloud-config.js" defer></script>
+  <script src="vendor/supabase-2.118.0.js" defer></script>
   <script src="task-model.js" defer></script>
+  <script src="cloud-sync.js" defer></script>
+  <script src="cloud.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to tasks</a>
-  <div class="app-shell">
+  <section id="authPanel" class="auth-panel" aria-labelledby="authTitle">
+    <a class="brand" href="#"><span class="brand-mark">/</span>SlashTasks</a>
+    <h1 id="authTitle">One step at a time.</h1><p class="muted">Your tasks, wherever you need them. Sign in with an email code.</p>
+    <form id="emailSignInForm"><label><span>Email address</span><input id="signInEmail" type="email" autocomplete="email" required placeholder="you@example.com"></label><button class="primary" id="sendCode">Email me a code</button></form>
+    <form id="verifyCodeForm" hidden><label><span>Sign-in code</span><input id="signInCode" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6,10}" minlength="6" maxlength="10" required></label><button class="primary" id="verifyCode">Sign in</button></form>
+    <p id="authStatus" role="status" class="suggestion-status">Connecting to your workspace…</p>
+  </section>
+  <div class="app-shell" id="appShell" hidden>
     <aside class="sidebar" aria-label="Workspace">
       <a class="brand" href="#" data-action="home"><span class="brand-mark">/</span>SlashTasks<span class="beta">beta</span></a>
       <button class="primary new-task" id="sideAdd">＋ New task <kbd>N</kbd></button>
@@ -28,14 +39,16 @@
       <nav id="listNav" class="list-nav" aria-label="Lists"></nav>
       <div class="sidebar-note"><span aria-hidden="true">🌱</span><strong>Small steps count.</strong><p>You only need a place to start.</p></div>
       <button id="settingsButton" class="settings-link">⚙ Settings &amp; backup <span id="aiIndicator" class="status-dot" title="AI status"></span></button>
-      <p class="local-note">Saved in this browser</p>
+      <button class="settings-link" id="accountButton"><span id="accountName">Your profile</span></button>
     </aside>
 
     <main id="main" class="main-content" tabindex="-1">
       <header class="topbar"><span>My space <span class="crumb-slash">/</span> <strong id="viewCrumb">Today</strong></span><label class="search"><span aria-hidden="true">⌕</span><input id="searchInput" type="search" placeholder="Find a task or step" aria-label="Search tasks and steps"><kbd>/</kbd></label></header>
       <div class="content-wrap">
         <div id="storageNotice" class="notice error" role="alert" hidden></div>
-        <div id="launchNotice" class="notice" hidden>For AI suggestions and settings, open SlashTasks through the local server. <span>Double-click <strong>start.command</strong> in the project folder.</span></div>
+        <div class="sync-bar"><span id="syncStatus" role="status" aria-live="polite">Connecting to your cloud…</span><button id="syncNow" class="text-button">Sync now</button></div>
+        <p id="syncDetail" class="suggestion-status" role="status"></p>
+        <section id="syncConflict" class="notice" hidden><h3>Let’s keep the right change</h3><p>Another device changed the same item. Your offline copy is kept until you choose. This choice applies to the whole saved action, including its steps.</p><div id="conflictItems"></div><div class="button-row"><button id="keepLocalChange" class="secondary">Keep my change</button><button id="useCloudChange" class="secondary">Use cloud change</button></div></section>
         <header class="page-heading"><div><p class="eyebrow" id="dateLine"></p><h1 id="pageTitle">Today</h1><p id="pageSubtitle" class="muted">One small step is a good place to start.</p></div><button id="focusButton" class="secondary" aria-pressed="false">◎ Focus mode</button></header>
         <section id="dayCard" class="day-summary" aria-label="At a glance"></section>
         <section id="focusCallout" class="focus-callout" aria-labelledby="focusTitle">
@@ -86,7 +99,7 @@
         <summary>⏰ Reminders &amp; repeat <span id="detailsSummary"></span></summary>
         <label class="toggle-label"><input type="checkbox" id="taskReminderEnabled">Remind me about this task and its dated steps</label>
         <div id="reminderFields" class="reminder-fields" hidden><label><span>Reminder date</span><input id="taskReminderDate" type="date"></label><label><span>Time <small>(optional)</small></span><input id="taskReminderTime" type="time"></label></div>
-        <p class="field-hint" id="reminderNote">Reminders appear while the app is open. A blank time uses 9:00 AM.</p>
+        <p class="field-hint" id="reminderNote">Reminders appear while the app is open. A blank time uses your profile’s default reminder time.</p>
         <label class="repeat-field"><span>🔁 Repeat</span><select id="taskRepeat"><option value="none">Doesn’t repeat</option><option value="daily">Every day</option><option value="weekdays">Weekdays</option><option value="weekly">Every week</option><option value="after1day">1 day after completion</option></select></label>
       </details>
       <div class="dialog-footer"><button type="button" id="deleteTaskButton" class="text-button danger" hidden>Delete task</button><span class="keyboard-hint">Enter to save</span><button id="saveTaskButton" type="submit" class="primary">Add task →</button></div>
@@ -102,11 +115,11 @@
 
   <dialog id="settingsDialog" class="settings-dialog" aria-labelledby="settingsTitle">
     <div class="dialog-heading"><h2 id="settingsTitle">Make yourself at home</h2><button class="icon-button" data-close="settingsDialog" aria-label="Close settings">×</button></div>
+    <section class="settings-section"><h3>Your profile</h3><p id="accountEmail" class="muted"></p><form id="profileForm"><label><span>Display name</span><input id="profileName" maxlength="80" autocomplete="nickname"></label><label><span>Default reminder time</span><input id="profileReminderTime" type="time"></label><p class="field-hint">Reminders use the current device’s timezone.</p><button class="secondary">Save profile</button></form><p id="profileStatus" role="status" class="suggestion-status"></p><button id="signOut" class="text-button">Sign out</button></section>
     <section class="settings-section"><h3>✦ AI step suggestions</h3><p class="muted">Optional help turning a task into small, doable steps.</p><p id="aiConnectionStatus" class="notice" role="status"></p>
-      <form id="aiSettingsForm"><label><span>OpenAI API key</span><input id="apiKeyInput" type="password" autocomplete="off" placeholder="Paste a key to set up or replace it"></label><p class="field-hint">Stored in a private .env file on this Mac. Task names and existing steps are sent to OpenAI when you ask for suggestions.</p><button id="saveApiKey" class="secondary">Save API key</button></form>
-      <p id="settingsStatus" role="status" class="suggestion-status"></p>
+      <p class="field-hint">When you ask for suggestions, the task name and existing steps are sent to OpenAI. Suggestions are yours to review before adding.</p>
     </section>
-    <section class="settings-section"><h3>Keep a copy of your tasks</h3><p class="muted">Tasks live in this browser. A backup lets you move them between browsers or from the old file version.</p><div class="button-row"><button id="exportTasks" class="secondary">↓ Export backup</button><button id="importTasks" class="secondary">↑ Import &amp; merge</button></div><input id="importFile" type="file" accept=".json,application/json" hidden><p id="backupStatus" role="status" class="suggestion-status"></p></section>
+    <section class="settings-section"><h3>Keep a copy of your tasks</h3><p class="muted">Your tasks sync to your account. A backup gives you an extra copy, including any changes still waiting to sync.</p><div class="button-row"><button id="exportTasks" class="secondary">↓ Export backup</button><button id="importTasks" class="secondary">↑ Import &amp; merge</button></div><input id="importFile" type="file" accept=".json,application/json" hidden><p id="backupStatus" role="status" class="suggestion-status"></p></section>
     <section class="settings-section"><h3>Gentle reminders</h3><p class="muted" id="notificationStatus"></p><button id="enableNotifications" class="secondary">Enable browser notifications</button></section>
     <p class="field-hint">SlashTasks beta · One step at a time</p>
   </dialog>

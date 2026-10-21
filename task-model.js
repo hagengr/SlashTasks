@@ -24,7 +24,7 @@
   function step(value) {
     const s = typeof value === 'string' ? { title: value } : value || {};
     return { id: String(s.id || id()), title: String(s.title || '').slice(0, 120), dueDate: validDate(s.dueDate),
-      dueTime: validTime(s.dueTime), done: !!s.done, reminderNotifiedAt: s.reminderNotifiedAt || null };
+      dueTime: validTime(s.dueTime), done: !!s.done, ...(s.seriesStepId ? {seriesStepId:String(s.seriesStepId)} : {}), reminderNotifiedAt: s.reminderNotifiedAt || null };
   }
   function normalize(raw) {
     const source = raw && typeof raw === 'object' ? raw : {};
@@ -130,10 +130,10 @@
         const nextDate = nextRepeatDate(task, now), base = task.dueDate || now;
         const shift = Math.round((new Date(nextDate + 'T12:00:00') - new Date(base + 'T12:00:00')) / 86400000);
         const reminderOffset = task.reminderDate ? Math.round((new Date(task.reminderDate + 'T12:00:00') - new Date(base + 'T12:00:00')) / 86400000) : 0;
-        const next = { ...task, id: id(), done: false, completedAt: null, nextOccurrenceId: null, seriesId: task.seriesId || task.id,
+        const next = { ...task, id: 'r:' + (task.seriesId || task.id) + ':' + nextDate, sourceOccurrenceId: task.id, done: false, completedAt: null, nextOccurrenceId: null, seriesId: task.seriesId || task.id,
           dueDate: nextDate, reminderDate: task.reminderDate ? addDays(nextDate, reminderOffset) : '',
-          reminderNotifiedAt: null, snoozedUntil: null, priority: Date.now(),
-          steps: task.steps.map(s => ({ ...s, id: id(), done: false, dueDate: s.dueDate ? addDays(s.dueDate, shift) : '', reminderNotifiedAt: null })) };
+          reminderNotifiedAt: null, snoozedUntil: null, priority: Date.parse(nextDate + 'T12:00:00Z'),
+          steps: task.steps.map(s => ({ ...s, id: 'step:' + (task.seriesId || task.id) + ':' + nextDate + ':' + (s.seriesStepId || s.id), seriesStepId: s.seriesStepId || s.id, done: false, dueDate: s.dueDate ? addDays(s.dueDate, shift) : '', reminderNotifiedAt: null })) };
         state.tasks.unshift(next);
         task.nextOccurrenceId = next.id;
       }
@@ -146,9 +146,9 @@
       task.completedAt = null;
     }
   }
-  function reminders(state, at = Date.now()) {
+  function reminders(state, at = Date.now(), defaultTime = '09:00') {
     const due = [];
-    const instant = (date, time) => date ? new Date(date + 'T' + (time || '09:00') + ':00').getTime() : Infinity;
+    const instant = (date, time) => date ? new Date(date + 'T' + (time || validTime(defaultTime) || '09:00') + ':00').getTime() : Infinity;
     for (const task of state.tasks) {
       if (task.done || !task.remindersEnabled) continue;
       const snooze = task.snoozedUntil ? new Date(task.snoozedUntil).getTime() : null;

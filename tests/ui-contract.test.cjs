@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const root = path.join(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
-const source = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+const source = ['app.js','cloud.js'].map(file=>fs.readFileSync(path.join(root,file),'utf8')).join('');
 test('every static UI ID referenced by the controller exists once in the document', () => {
   const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]);
   assert.equal(new Set(ids).size, ids.length, 'Duplicate IDs can disconnect controls.');

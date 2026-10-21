@@ -1,75 +1,52 @@
-/* SlashTasks UI. Task rules live in task-model.js; the server is optional. */
+/* SlashTasks UI. Task rules live in task-model.js; account persistence lives in cloud-sync.js. */
 (() => {
   'use strict';
   const M = window.SlashTasksModel;
+  const C = window.SlashTasksCloud, S = window.SlashTasksSync;
   const $ = selector => document.querySelector(selector);
-  const STORAGE_KEY = 'slashtasks-v1';
   const PREFS_KEY = 'slashtasks-preferences';
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   const clone = value => JSON.parse(JSON.stringify(value));
   const listIcon = list => ({ Personal: '🌿', Work: '💼', Home: '🏠' })[list] || '📁';
   const energyText = energy => ({ small: '🌱 Small', medium: '🌿 Medium', big: '🔥 Big' })[energy] || '🌿 Medium';
   const repeats = { daily: 'Daily', weekdays: 'Weekdays', weekly: 'Weekly', after1day: 'After completion' };
-  const localServer = ['http:', 'https:'].includes(location.protocol);
-  let storageLocked = false, rawRecovery = null, recoveryExported = false;
-
-  function sampleState() {
-    return M.normalize({ lists: ['Personal', 'Work', 'Home'], tasks: [
-      { id: 't1', title: 'Send the project update to Maya', list: 'Work', dueDate: M.today(), energy: 'small', steps: [] },
-      { id: 't2', title: 'Book a dentist appointment', list: 'Personal', dueDate: M.today(), energy: 'small', steps: [
-        { id: 's1', title: 'Find the dentist’s phone number' }, { id: 's2', title: 'Call to ask for an opening' }
-      ] },
-      { id: 't3', title: 'Tidy up the desk for 10 minutes', list: 'Home', dueDate: M.today(), energy: 'medium' },
-      { id: 't4', title: 'Pick up a few groceries', list: 'Personal', dueDate: M.addDays(M.today(), 1), energy: 'medium' },
-      { id: 't5', title: 'Review the notes from Monday', list: 'Work', dueDate: '', energy: 'big' }
-    ] });
-  }
-
-  function loadState() {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (!saved) return sampleState();
-      rawRecovery = saved;
-      const parsed = JSON.parse(saved);
-      if (!Array.isArray(parsed?.tasks)) throw new Error('Invalid task data');
-      return M.normalize(parsed);
-    } catch {
-      storageLocked = true;
-      $('#storageNotice').hidden = false;
-      $('#storageNotice').textContent = 'Your saved tasks could not be read. They have been left untouched. Open Settings to export a recovery copy.';
-      return M.normalize({});
-    }
-  }
-  let state = loadState();
+  let storageLocked = true, identityEpoch = 0, saving = false, profile = {};
+  let state = M.normalize({});
   let prefs = { mode: 'tasks', layout: 'list', sort: 'due', completed: false };
   try { prefs = { ...prefs, ...JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') }; } catch { /* Preferences can reset safely. */ }
   if (!['tasks', 'steps'].includes(prefs.mode)) prefs.mode = 'tasks';
   if (!['list', 'table'].includes(prefs.layout)) prefs.layout = 'list';
   let activeView = 'today', query = '', focused = false, chosenId = null, undoState = null, toastTimer;
-  let editingTaskId = null, editorOriginal = '', reminderManual = false, modalReturnFocus = null;
+  let editingTaskId = null, editorOriginal = '', editorBaseline = null, editorObserved = {}, reminderManual = false, modalReturnFocus = null;
   let suggestionController = null, suggestionEpoch = 0, suggestions = [], cooldownUntil = 0;
-  let completionTaskId = null, apiStatus = { available: localServer, configured: false };
+  let completionTaskId = null, apiStatus = { available: true, configured: false };
 
-  function persist() {
-    if (storageLocked) { toast('Saved data needs recovery first. Export it in Settings.'); return false; }
+  async function persist(previous, expected) {
+    if (storageLocked || !C.engine) { toast('Sign in before saving changes.'); return false; }
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      await C.commit(previous, clone(state), expected);
       $('#storageNotice').hidden = true;
       return true;
-    } catch {
+    } catch (error) {
       $('#storageNotice').hidden = false;
-      $('#storageNotice').textContent = 'This browser could not save your changes. Export a backup in Settings before leaving.';
+      $('#storageNotice').textContent = error.message || 'This device could not save the offline queue. Export a backup before leaving.';
       return false;
     }
   }
-  function change(action, message, allowUndo = true) {
-    const previous = clone(state);
-    action();
-    if (!persist()) { state = previous; render(); toast('Could not save that change. Please export a backup.'); return false; }
-    undoState = allowUndo ? previous : null;
-    render();
-    if (message) toast(message, allowUndo);
-    return true;
+  async function change(action, message, allowUndo = true, expected) {
+    if(saving || storageLocked || !C.engine) { toast('Please wait for your account to finish loading.'); return false; }
+    const epoch = identityEpoch, previous = clone(state);
+    saving = true;
+    try {
+      action();
+      const after = clone(state);
+      if (!await persist(previous, expected)) { if(epoch===identityEpoch)state=previous; render(); toast('Could not save that change on this device.'); return false; }
+      if(epoch!==identityEpoch)return false;
+      undoState = allowUndo ? {before:previous,after} : null;
+      render();
+      if (message) toast(message, allowUndo);
+      return true;
+    } finally { if(epoch===identityEpoch)saving = false; }
   }
   function toast(message, undo = false) {
     clearTimeout(toastTimer);
@@ -294,7 +271,9 @@
     let newRow;
     if (addStep || (!task && !breakdown)) newRow = addStepEditorRow();
     updateReminderFields();
-    editorOriginal = JSON.stringify(editorData());
+    editorBaseline = clone(editorData());
+    editorObserved = C.observed;
+    editorOriginal = JSON.stringify(editorBaseline);
     $('#taskModal').showModal();
     const targetRow = focusStep ? [...$('#stepEditor').children].find(r => r.dataset.id === focusStep) : newRow;
     if (targetRow && (breakdown || focusStep)) (targetRow.querySelector(focusStep ? '.step-date-input' : '.step-title-input')).focus();
@@ -315,7 +294,7 @@
     if ($('#taskRepeat').value !== 'none') summary.push(repeats[$('#taskRepeat').value]);
     $('#detailsSummary').textContent = summary.join(' · ');
   }
-  function saveTask(event) {
+  async function saveTask(event) {
     event.preventDefault();
     const form = editorData();
     if (!form.title) { $('#taskTitle').setCustomValidity('Give this task a name.'); $('#taskTitle').reportValidity(); return; }
@@ -325,18 +304,33 @@
       return;
     }
     const task = editingTaskId && taskById(editingTaskId);
+    if(editingTaskId && !task){toast('This task was deleted on another device. Your draft is still open.');return;}
     const savedId = task?.id || M.id();
     const data = { ...form, steps: form.steps.filter(s => s.title).map(s => {
       const old = task?.steps.find(v => v.id === s.id);
       return { ...s, reminderNotifiedAt: old && old.dueDate === s.dueDate && old.dueTime === s.dueTime ? old.reminderNotifiedAt : null };
     }), reminderDate: form.remindersEnabled ? form.reminderDate : '', reminderTime: form.remindersEnabled ? form.reminderTime : '' };
-    const ok = change(() => {
+    if(task && editorBaseline){
+      const baseline={...editorBaseline,reminderDate:editorBaseline.remindersEnabled?editorBaseline.reminderDate:'',reminderTime:editorBaseline.remindersEnabled?editorBaseline.reminderTime:''};
+      for(const field of ['title','list','energy','dueDate','reminderDate','reminderTime','remindersEnabled','repeat']){
+        if(S.equal(data[field],baseline[field]))data[field]=task[field];
+      }
+      const initial=new Map(editorBaseline.steps.map(step=>[step.id,step]));
+      data.steps=data.steps.filter(step=>{
+        const old=initial.get(step.id),current=task.steps.find(s=>s.id===step.id);
+        if(old&&!current&&['title','dueDate','dueTime','done'].every(field=>S.equal(step[field],old[field])))return false;
+        if(old&&current)for(const field of ['title','dueDate','dueTime','done'])if(S.equal(step[field],old[field]))step[field]=current[field];
+        return true;
+      });
+      data.steps.push(...task.steps.filter(step=>!initial.has(step.id)&&!data.steps.some(s=>s.id===step.id)));
+    }
+    const ok = await change(() => {
       if (task) {
         const reminderChanged = task.reminderDate !== data.reminderDate || task.reminderTime !== data.reminderTime || task.remindersEnabled !== data.remindersEnabled;
         Object.assign(task, data);
         if (reminderChanged) { task.reminderNotifiedAt = null; task.snoozedUntil = null; task.steps.forEach(s => s.reminderNotifiedAt = null); }
       } else state.tasks.unshift({ ...data, id: savedId, done: false, priority: Date.now(), reminderNotifiedAt: null });
-    }, task ? 'Changes saved.' : 'Captured. One less thing to hold in your head.');
+    }, task ? 'Changes saved on this device.' : 'Captured. Cloud sync will follow.', true, task ? editorObserved : undefined);
     if (ok) {
       closeEditor(true);
       const saved = taskById(savedId);
@@ -349,14 +343,15 @@
       }
     }
   }
-  function deleteTask() {
+  async function deleteTask() {
     const task = taskById(editingTaskId);
     if (!task) return;
-    if (change(() => { state.tasks = state.tasks.filter(t => t.id !== task.id); }, 'Task deleted.')) closeEditor(true);
+    if (await change(() => { state.tasks = state.tasks.filter(t => t.id !== task.id); }, 'Task deleted.')) closeEditor(true);
   }
-  function toggleStep(task, s, checked) {
-    if (!change(() => { s.done = checked; }, checked ? 'One step done.' : 'Step reopened.')) return;
-    if (checked && !task.done && task.steps.length && task.steps.every(step => step.done)) {
+  async function toggleStep(task, s, checked) {
+    if (!await change(() => { s.done = checked; }, checked ? 'One step done.' : 'Step reopened.')) return;
+    task=taskById(task.id);
+    if (checked && task && !task.done && task.steps.length && task.steps.every(step => step.done)) {
       completionTaskId = task.id;
       $('#completionMessage').textContent = 'Is “' + task.title + '” finished, or is there more to do?';
       $('#completionDialog').showModal();
@@ -386,7 +381,8 @@
     if (suggestionController) { abortSuggestions(); $('#suggestionStatus').textContent = 'Suggestions canceled. Your steps are unchanged.'; return; }
     const title = $('#taskTitle').value.trim();
     if (!title) { showSuggestionError('Add a task name first.'); $('#taskTitle').focus(); return; }
-    if (!localServer) { showSuggestionError('Open the app using start.command to connect AI. Your tasks still work here.', true); return; }
+    if (!C.engine) { showSuggestionError('Sign in to request suggestions.'); return; }
+    if (!C.aiEnabled) { showSuggestionError('AI suggestions have not been enabled for this workspace. You can add steps below.'); return; }
     if (Date.now() < cooldownUntil) { showSuggestionError('Please wait ' + Math.ceil((cooldownUntil - Date.now()) / 1000) + ' seconds before trying again.'); return; }
     abortSuggestions();
     const epoch = suggestionEpoch, controller = new AbortController();
@@ -398,9 +394,7 @@
     $('#suggestionReview').hidden = true;
     const current = editorData();
     try {
-      const response = await fetch('/api/suggest-subtasks', { method: 'POST', signal: controller.signal,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, list: current.list, energy: current.energy, existingSteps: current.steps.map(s => s.title).filter(Boolean) }) });
+      const response = await C.suggest({ title, list: current.list, energy: current.energy, existingSteps: current.steps.map(s => s.title).filter(Boolean) }, controller.signal);
       const data = await response.json();
       if (epoch !== suggestionEpoch || !$('#taskModal').open) return;
       if (!response.ok) {
@@ -418,7 +412,7 @@
       $('#suggestionStatus').textContent = 'Review these suggestions. They’re added only when you choose “Add selected steps”.';
     } catch (error) {
       if (epoch !== suggestionEpoch || !$('#taskModal').open) return;
-      showSuggestionError(error.name === 'AbortError' ? 'That took too long. Try again when you’re ready.' : (error.message || 'Could not connect to AI. Check the local server.'));
+      showSuggestionError(error.name === 'AbortError' ? 'That took too long. Try again when you’re ready.' : (error.message || 'Could not reach the suggestion service. Please try again.'));
     } finally {
       clearTimeout(timer);
       if (epoch === suggestionEpoch) { suggestionController = null; $('#suggestStepsButton').textContent = '✦ Suggest steps'; }
@@ -436,55 +430,30 @@
   }
 
   async function refreshApiStatus() {
-    if (!localServer) return;
-    try {
-      const response = await fetch('/api/status', { cache: 'no-store' });
-      if (!response.ok) throw new Error('No server');
-      const data = await response.json();
-      apiStatus = { available: true, configured: !!data.configured, model: data.model };
-    } catch { apiStatus = { available: false, configured: false }; }
-    $('#aiIndicator').classList.toggle('configured', apiStatus.configured);
-    $('#aiIndicator').title = apiStatus.configured ? 'AI key configured' : 'AI setup available in Settings';
+    apiStatus = {available:!!C.engine,configured:C.aiEnabled};
+    $('#aiIndicator').classList.toggle('configured',apiStatus.configured);
+    $('#aiIndicator').title=apiStatus.configured?'AI suggestions available':'AI is optional';
   }
   async function openSettings() {
-    $('#settingsStatus').textContent = '';
     $('#backupStatus').textContent = '';
-    $('#apiKeyInput').value = '';
     if (!$('#settingsDialog').open) $('#settingsDialog').showModal();
     await refreshApiStatus();
-    $('#aiConnectionStatus').textContent = !localServer ? 'Open the app with start.command to configure AI.' : !apiStatus.available
-      ? 'The local AI server is unavailable. Restart with start.command.' : apiStatus.configured
-      ? 'API key configured. Availability is checked when you request suggestions.' : 'AI is not set up yet. Add an API key below, or keep adding steps yourself.';
-    $('#aiSettingsForm').hidden = !localServer || !apiStatus.available;
+    $('#aiConnectionStatus').textContent = C.aiEnabled ? 'AI suggestions are available through your account.' : 'AI suggestions have not been enabled for this workspace yet. You can always add steps yourself.';
+    $('#profileName').value=profile.displayName||'';
+    $('#profileReminderTime').value=profile.reminderTime||'09:00';
+    C.captureProfileDraft?.();
     const permission = 'Notification' in window ? Notification.permission : 'unsupported';
     $('#notificationStatus').textContent = permission === 'granted' ? 'Browser notifications are enabled. Keep SlashTasks open to receive reminders.'
       : permission === 'denied' ? 'Notifications are blocked in browser settings. In-app reminders still appear while SlashTasks is open.'
       : permission === 'unsupported' ? 'This browser supports in-app reminders only.' : 'Allow browser notifications to see reminders while this tab is in the background.';
     $('#enableNotifications').hidden = permission !== 'default';
   }
-  async function saveApiKey(event) {
-    event.preventDefault();
-    const key = $('#apiKeyInput').value.trim();
-    if (!key) { $('#settingsStatus').textContent = 'Paste an OpenAI API key first.'; return; }
-    $('#saveApiKey').disabled = true;
-    try {
-      const response = await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ apiKey: key }) });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Could not save the API key.');
-      $('#apiKeyInput').value = '';
-      await refreshApiStatus();
-      $('#aiConnectionStatus').textContent = 'Key saved on this Mac. Try suggesting steps to check API access.';
-      $('#settingsStatus').textContent = 'Saved. No server restart needed.';
-    } catch (error) { $('#settingsStatus').textContent = error.message; }
-    finally { $('#saveApiKey').disabled = false; }
-  }
   function exportTasks() {
-    const text = storageLocked && rawRecovery ? rawRecovery : JSON.stringify({ ...state, exportedAt: new Date().toISOString() }, null, 2);
+    const text = JSON.stringify({ ...state, exportedAt: new Date().toISOString() }, null, 2);
     const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
     const link = document.createElement('a'); link.href = url; link.download = 'slashtasks-' + M.today() + '.json'; link.click();
     setTimeout(() => URL.revokeObjectURL(url), 5000);
-    recoveryExported = true;
-    $('#backupStatus').textContent = storageLocked ? 'Recovery copy downloaded. You can now import a valid backup.' : 'Backup downloaded. It includes tasks and lists only.';
+    $('#backupStatus').textContent = 'Backup downloaded. It includes tasks and lists only.';
   }
   async function importTasks(event) {
     const file = event.target.files[0];
@@ -495,23 +464,16 @@
       if (!Array.isArray(raw.tasks) || !raw.tasks.every(t => t && typeof t.title === 'string' && t.title.trim())) throw new Error('This file does not look like a SlashTasks task backup.');
       const incoming = M.normalize(raw);
       const added = incoming.tasks.filter(t => !state.tasks.some(existing => existing.id === t.id));
-      if (storageLocked) {
-        if (!recoveryExported) throw new Error('Export your recovery copy before restoring a valid backup.');
-        if (!confirm('Replace the unreadable saved data with this backup? Your recovery file has already been downloaded.')) return;
-        const original = state; state = incoming; storageLocked = false;
-        if (!persist()) { state = original; storageLocked = true; throw new Error('The browser still cannot save. Your recovery copy is available.'); }
-        rawRecovery = null; undoState = null; render();
-        $('#backupStatus').textContent = 'Backup restored. ' + incoming.tasks.length + ' tasks are ready.';
-        return;
-      }
-      if (change(() => { state.tasks.push(...added); state.lists = [...new Set([...state.lists, ...incoming.lists])]; }, 'Backup merged.')) {
+      if (await change(() => { state.tasks.push(...added); state.lists = [...new Set([...state.lists, ...incoming.lists])]; }, 'Backup merged.')) {
         $('#backupStatus').textContent = added.length + ' tasks added. Existing tasks were kept; matching task IDs were skipped.';
       }
     } catch (error) { $('#backupStatus').textContent = error.message || 'Could not read that backup.'; }
     finally { event.target.value = ''; }
   }
-  function checkReminders() {
-    const alerts = M.reminders(state);
+  async function checkReminders() {
+    if(storageLocked||!C.engine)return;
+    const previous=clone(state);
+    const alerts = M.reminders(state, Date.now(), profile.reminderTime);
     if (!alerts.length) return;
     const stamp = new Date().toISOString();
     for (const { task, step } of alerts) {
@@ -521,7 +483,7 @@
         try { new Notification(step ? 'Step for ' + task.title : 'SlashTasks reminder', { body: step?.title || task.title }); } catch { /* The in-app reminder remains available. */ }
       }
     }
-    persist();
+    await persist(previous);
     toast(alerts.length === 1 ? '⏰ ' + (alerts[0].step?.title || alerts[0].task.title) : '⏰ ' + alerts.length + ' reminders are ready. Check Today.');
   }
 
@@ -601,27 +563,27 @@
   $('#sortSelect').addEventListener('change', event => { prefs.sort = event.target.value; savePrefs(); render(); });
   $('#showCompleted').addEventListener('change', event => { prefs.completed = event.target.checked; savePrefs(); render(); });
   $('#addList').addEventListener('click', () => { $('#listForm').reset(); $('#listDialog').showModal(); $('#newListName').focus(); });
-  $('#listForm').addEventListener('submit', event => {
+  $('#listForm').addEventListener('submit', async event => {
     event.preventDefault(); const name = $('#newListName').value.trim();
     if (!name) return;
     if (['today', 'upcoming', 'unscheduled', 'all'].includes(name.toLowerCase()) || state.lists.some(v => v.toLowerCase() === name.toLowerCase())) {
       $('#newListName').setCustomValidity('Choose a different name. This one is already used.'); $('#newListName').reportValidity(); return;
     }
-    if (change(() => state.lists.push(name), 'List added.')) { $('#listDialog').close(); setView(name); }
+    if (await change(() => state.lists.push(name), 'List added.')) { $('#listDialog').close(); setView(name); }
   });
   $('#newListName').addEventListener('input', () => $('#newListName').setCustomValidity(''));
   $('#settingsButton').addEventListener('click', openSettings);
-  $('#aiSettingsForm').addEventListener('submit', saveApiKey);
-  $('#settingsDialog').addEventListener('close', () => { $('#apiKeyInput').value = ''; });
+  $('#accountButton').addEventListener('click',openSettings);
   $('#exportTasks').addEventListener('click', exportTasks);
   $('#importTasks').addEventListener('click', () => $('#importFile').click());
   $('#importFile').addEventListener('change', importTasks);
   $('#enableNotifications').addEventListener('click', async () => { if ('Notification' in window) { await Notification.requestPermission(); openSettings(); } });
-  $('#undoButton').addEventListener('click', () => {
-    if (!undoState) return;
-    const current = state; state = undoState;
-    if (!persist()) { state = current; return; }
-    undoState = null; render(); toast('Undone.');
+  $('#undoButton').addEventListener('click', async () => {
+    if (!undoState || !C.userId) return;
+    try {
+      const next=S.undoState(state,undoState.before,undoState.after,C.userId);
+      await change(()=>{state=next;},'Undone.',false);
+    }catch(error){toast(error.message);}
   });
   document.addEventListener('keydown', event => {
     const typing = event.target.matches?.('input, textarea, select, [contenteditable]');
@@ -630,15 +592,23 @@
         !event.target.closest('button, select, textarea, #suggestionReview')) {
       event.preventDefault(); $('#taskForm').requestSubmit(); return;
     }
-    if (dialog || typing || event.metaKey || event.ctrlKey || event.altKey) return;
+    if (dialog || typing || storageLocked || !C.engine || event.metaKey || event.ctrlKey || event.altKey) return;
     if (event.key.toLowerCase() === 'n') { event.preventDefault(); openModal(); }
     if (event.key === '/') { event.preventDefault(); $('#searchInput').focus(); }
   });
   // Never leave a request alive after its editor has closed.
   $('#taskModal').addEventListener('close', abortSuggestions);
-  $('#launchNotice').hidden = localServer;
   render();
-  refreshApiStatus();
+  C.start({
+    account: user => {
+      identityEpoch++;storageLocked=true;saving=false;abortSuggestions();undoState=null;chosenId=null;
+      for(const dialog of document.querySelectorAll('dialog[open]'))dialog.close();
+      state=M.normalize({});profile={};render();
+      if(!user)$('#syncDetail').textContent='';
+    },
+    state: (incoming, incomingProfile) => {state=incoming;profile=incomingProfile;storageLocked=false;render();},
+    locked: locked=>{storageLocked=locked;}
+  });
   checkReminders();
   let lastDay = M.today();
   setInterval(() => {
