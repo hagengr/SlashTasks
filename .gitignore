@@ -5,3 +5,6 @@ Thumbs.db
 !.env.example
 node_modules/
 coverage/
+dist/
+.supabase/
+supabase/.temp/
