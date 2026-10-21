@@ -13,6 +13,7 @@
   <script src="task-model.js" defer></script>
   <script src="cloud-sync.js" defer></script>
   <script src="cloud.js" defer></script>
+  <script src="mind-map.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -76,13 +77,13 @@
   <dialog id="taskModal" class="task-modal" aria-labelledby="modalTitle">
     <form id="taskForm">
       <div class="dialog-heading"><div><p class="eyebrow" id="modalKicker">GET IT OUT OF YOUR HEAD</p><h2 id="modalTitle">Add a task</h2></div><button type="button" class="icon-button" id="closeModal" aria-label="Close task editor">×</button></div>
-      <label class="sr-only" for="taskTitle">Task name</label>
-      <input id="taskTitle" class="task-input" placeholder="What would you like to get done?" maxlength="120" autocomplete="off" required>
-      <div class="form-grid">
+      <div class="editor-mode-bar"><span>Capture your way</span><div class="segmented" role="group" aria-label="Task entry mode"><button type="button" data-editor-mode="form" aria-pressed="true">☰ Form</button><button type="button" data-editor-mode="map" aria-pressed="false">⌘ Mind map</button></div></div>
+      <div id="taskTitleHome"><div id="taskNameField"><label class="sr-only" for="taskTitle">Task name</label><input id="taskTitle" class="task-input" placeholder="What would you like to get done?" maxlength="120" autocomplete="off" required></div></div>
+      <div id="taskMetaHome"><div class="form-grid" id="taskMetaFields">
         <label><span>📁 List</span><select id="taskListSelect"></select></label>
         <label><span>⚡ Energy</span><select id="taskEnergy"><option value="small">🌱 Small</option><option value="medium">🌿 Medium</option><option value="big">🔥 Big</option></select></label>
         <label><span>📅 Due date</span><input id="taskDueDate" type="date"></label>
-      </div>
+      </div></div>
       <section class="steps-section" aria-labelledby="stepsTitle">
         <div class="steps-heading"><div><h3 id="stepsTitle">🧩 Make it easier to start</h3><p class="field-hint">A few small steps. Dates and times are optional.</p></div><button type="button" class="secondary compact" id="suggestStepsButton">✦ Suggest steps</button></div>
         <div id="suggestionStatus" class="suggestion-status" aria-live="polite"></div>
@@ -92,9 +93,20 @@
           <div id="suggestionList"></div>
           <button type="button" id="acceptSuggestions" class="primary compact">Add selected steps</button>
         </section>
-        <div id="stepEditor" class="step-editor"></div>
+        <section id="mindMapEditor" class="mind-map-editor" aria-label="Mind map entry" hidden>
+          <div class="mind-map-toolbar"><p id="mindMapHint">Name your task, then branch into small steps.</p><div class="mind-map-tools"><div class="mind-map-legend" aria-label="Map colors"><span class="map-task-key">Task</span><span class="map-step-key">Step</span></div><button type="button" id="mindMapCenter" class="text-button">◎ Center task</button></div></div>
+          <div id="mindMapViewport" class="mind-map-viewport" tabindex="0" role="region" aria-label="Task mind map. Scroll to explore the branches." aria-describedby="mindMapHint">
+            <div id="mindMapCanvas" class="mind-map-canvas">
+              <svg id="mindMapLines" class="mind-map-lines" aria-hidden="true" focusable="false"></svg>
+              <div id="mindMapRoot" class="mind-map-root"><button type="button" id="mindMapAddStep" class="mind-map-add">＋ Add step</button></div>
+            </div>
+          </div>
+          <div class="mind-map-caption"><span>Enter adds a step · Ctrl/⌘ + Enter saves</span><span id="mindMapCount" role="status" aria-live="polite">No steps yet</span></div>
+        </section>
+        <div id="stepEditorHome"><div id="stepEditor" class="step-editor"></div></div>
         <button type="button" id="addStepButton" class="text-button add-step">＋ Add a step</button>
       </section>
+      <div id="mindMapMetaHome" hidden></div>
       <details id="taskDetails" class="task-details">
         <summary>⏰ Reminders &amp; repeat <span id="detailsSummary"></span></summary>
         <label class="toggle-label"><input type="checkbox" id="taskReminderEnabled">Remind me about this task and its dated steps</label>
@@ -102,7 +114,7 @@
         <p class="field-hint" id="reminderNote">Reminders appear while the app is open. A blank time uses your profile’s default reminder time.</p>
         <label class="repeat-field"><span>🔁 Repeat</span><select id="taskRepeat"><option value="none">Doesn’t repeat</option><option value="daily">Every day</option><option value="weekdays">Weekdays</option><option value="weekly">Every week</option><option value="after1day">1 day after completion</option></select></label>
       </details>
-      <div class="dialog-footer"><button type="button" id="deleteTaskButton" class="text-button danger" hidden>Delete task</button><span class="keyboard-hint">Enter to save</span><button id="saveTaskButton" type="submit" class="primary">Add task →</button></div>
+      <div class="dialog-footer"><button type="button" id="deleteTaskButton" class="text-button danger" hidden>Delete task</button><span class="keyboard-hint" id="editorKeyboardHint">Enter to save</span><button id="saveTaskButton" type="submit" class="primary">Add task →</button></div>
     </form>
   </dialog>
 

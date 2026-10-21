@@ -121,6 +121,7 @@ function createApp({ root = __dirname, env = process.env, fetchImpl = globalThis
     '/cloud-config.js': ['cloud-config.js','text/javascript; charset=utf-8'],
     '/cloud-sync.js': ['cloud-sync.js','text/javascript; charset=utf-8'],
     '/cloud.js': ['cloud.js','text/javascript; charset=utf-8'],
+    '/mind-map.js': ['mind-map.js','text/javascript; charset=utf-8'],
     '/vendor/supabase-2.118.0.js': ['vendor/supabase-2.118.0.js','text/javascript; charset=utf-8'],
     '/task-model.js': ['task-model.js', 'text/javascript; charset=utf-8'],
     '/favicon.ico': ['favicon.svg', 'image/svg+xml'],

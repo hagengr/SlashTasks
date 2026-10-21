@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "test": "node --test tests/*.test.cjs",
-    "check": "node --check app.js && node --check task-model.js && node --check server.js && node --check cloud.js && node --check cloud-sync.js",
+    "check": "node --check app.js && node --check task-model.js && node --check server.js && node --check cloud.js && node --check cloud-sync.js && node --check mind-map.js",
     "build": "node scripts/build-cloud.cjs"
   },
   "engines": {

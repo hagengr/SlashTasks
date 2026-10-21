@@ -12,14 +12,16 @@
   const repeats = { daily: 'Daily', weekdays: 'Weekdays', weekly: 'Weekly', after1day: 'After completion' };
   let storageLocked = true, identityEpoch = 0, saving = false, profile = {};
   let state = M.normalize({});
-  let prefs = { mode: 'tasks', layout: 'list', sort: 'due', completed: false };
+  let prefs = { mode: 'tasks', layout: 'list', sort: 'due', completed: false, editorMode: 'form' };
   try { prefs = { ...prefs, ...JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') }; } catch { /* Preferences can reset safely. */ }
   if (!['tasks', 'steps'].includes(prefs.mode)) prefs.mode = 'tasks';
   if (!['list', 'table'].includes(prefs.layout)) prefs.layout = 'list';
+  if (!['form', 'map'].includes(prefs.editorMode)) prefs.editorMode = 'form';
   let activeView = 'today', query = '', focused = false, chosenId = null, undoState = null, toastTimer;
   let editingTaskId = null, editorOriginal = '', editorBaseline = null, editorObserved = {}, reminderManual = false, modalReturnFocus = null;
   let suggestionController = null, suggestionEpoch = 0, suggestions = [], cooldownUntil = 0;
   let completionTaskId = null, apiStatus = { available: true, configured: false };
+  const mindMap = window.SlashTasksMindMap?.create({onAdd: () => addStepEditorRow()}) || {active:false, setActive(){}, refresh(){}};
 
   async function persist(previous, expected) {
     if (storageLocked || !C.engine) { toast('Sign in before saving changes.'); return false; }
@@ -221,6 +223,7 @@
     row.className = 'step-editor-row';
     row.dataset.id = s.id;
     row.dataset.done = String(s.done);
+    if (s.seriesStepId) row.dataset.seriesStepId = s.seriesStepId;
     row.innerHTML = '<label class="step-title-label"><span>Step</span><input class="step-title-input" maxlength="120" placeholder="One small, concrete action" value="' +
       esc(s.title) + '"></label><label class="step-date-field"><span>📅 Date</span><input class="step-date-input" type="date" value="' +
       esc(s.dueDate) + '"></label><label class="step-time-field"><span>⏰ Time</span><input class="step-time-input" type="time" value="' +
@@ -240,7 +243,19 @@
       dueDate: $('#taskDueDate').value, reminderDate: $('#taskReminderDate').value, reminderTime: $('#taskReminderTime').value,
       remindersEnabled: $('#taskReminderEnabled').checked, repeat: $('#taskRepeat').value,
       steps: [...$('#stepEditor').children].map(row => ({ id: row.dataset.id, title: row.querySelector('.step-title-input').value.trim(),
-        dueDate: row.querySelector('.step-date-input').value, dueTime: row.querySelector('.step-time-input').value, done: row.dataset.done === 'true' })) };
+        dueDate: row.querySelector('.step-date-input').value, dueTime: row.querySelector('.step-time-input').value, done: row.dataset.done === 'true',
+        ...(row.dataset.seriesStepId ? {seriesStepId:row.dataset.seriesStepId} : {}) })) };
+  }
+  function setEditorMode(mode, focus = false) {
+    if (mode === 'map' && !window.SlashTasksMindMap) { toast('Mind map could not load. Refresh SlashTasks and try again.'); mode = 'form'; }
+    prefs.editorMode = mode === 'map' ? 'map' : 'form';
+    savePrefs();
+    document.querySelectorAll('[data-editor-mode]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.editorMode === prefs.editorMode)));
+    mindMap.setActive(prefs.editorMode === 'map');
+    if (focus) {
+      if (mindMap.active) mindMap.refresh({center:true, focus:$('#taskTitle')});
+      else $('#taskTitle').focus();
+    }
   }
   function openModal(task = null, { addStep = false, breakdown = false, focusStep = '' } = {}) {
     abortSuggestions();
@@ -269,15 +284,19 @@
     $('#taskDetails').open = !!task?.remindersEnabled || (task?.repeat && task.repeat !== 'none');
     (task?.steps || []).forEach(addStepEditorRow);
     let newRow;
-    if (addStep || (!task && !breakdown)) newRow = addStepEditorRow();
+    if (addStep || (!task && !breakdown && prefs.editorMode !== 'map')) newRow = addStepEditorRow();
     updateReminderFields();
     editorBaseline = clone(editorData());
     editorObserved = C.observed;
     editorOriginal = JSON.stringify(editorBaseline);
     $('#taskModal').showModal();
+    setEditorMode(prefs.editorMode);
     const targetRow = focusStep ? [...$('#stepEditor').children].find(r => r.dataset.id === focusStep) : newRow;
-    if (targetRow && (breakdown || focusStep)) (targetRow.querySelector(focusStep ? '.step-date-input' : '.step-title-input')).focus();
-    else if (breakdown && !task?.steps.length) $('#addStepButton').focus();
+    if (targetRow && (breakdown || focusStep)) {
+      const input = targetRow.querySelector(focusStep ? '.step-date-input' : '.step-title-input');
+      if (mindMap.active) mindMap.refresh({focus:input}); else input.focus();
+    }
+    else if (breakdown && !task?.steps.length) (mindMap.active ? $('#taskTitle') : $('#addStepButton')).focus();
     else $('#taskTitle').focus();
   }
   function closeEditor(force = false) {
@@ -495,6 +514,7 @@
     if (target.dataset.list) { setView(target.dataset.list); return; }
     if (target.dataset.mode) { prefs.mode = target.dataset.mode; savePrefs(); render(); return; }
     if (target.dataset.layout) { prefs.layout = target.dataset.layout; savePrefs(); render(); return; }
+    if (target.dataset.editorMode) { setEditorMode(target.dataset.editorMode, true); return; }
     if (target.dataset.close) { $('#' + target.dataset.close).close(); return; }
     if (target.dataset.action === 'home') { event.preventDefault(); setView('today'); return; }
     if (target.dataset.delete) {
@@ -543,7 +563,13 @@
   $('#taskReminderEnabled').addEventListener('change', updateReminderFields);
   $('#taskRepeat').addEventListener('change', updateReminderFields);
   $('#addStepButton').addEventListener('click', () => addStepEditorRow().querySelector('input').focus());
-  $('#stepEditor').addEventListener('click', event => { const remove = event.target.closest('.remove-step'); if (remove) remove.closest('.step-editor-row').remove(); });
+  $('#stepEditor').addEventListener('click', event => {
+    const remove = event.target.closest('.remove-step');
+    if (!remove) return;
+    const row = remove.closest('.step-editor-row'), next = row.nextElementSibling || row.previousElementSibling;
+    row.remove();
+    if (mindMap.active) mindMap.refresh({focus:next?.querySelector('.step-title-input') || $('#taskTitle')});
+  });
   $('#suggestStepsButton').addEventListener('click', suggestSteps);
   $('#acceptSuggestions').addEventListener('click', acceptSuggestions);
   $('#dismissSuggestions').addEventListener('click', () => { $('#suggestionReview').hidden = true; $('#suggestionStatus').textContent = 'Suggestions dismissed. Your steps are unchanged.'; });
@@ -586,8 +612,12 @@
     }catch(error){toast(error.message);}
   });
   document.addEventListener('keydown', event => {
+    if (event.defaultPrevented || event.isComposing) return;
     const typing = event.target.matches?.('input, textarea, select, [contenteditable]');
     const dialog = [...document.querySelectorAll('dialog[open]')].at(-1);
+    if (event.key === 'Enter' && $('#taskModal').open && dialog?.id === 'taskModal' && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault(); $('#taskForm').requestSubmit(); return;
+    }
     if (event.key === 'Enter' && $('#taskModal').open && dialog?.id === 'taskModal' && !event.shiftKey &&
         !event.target.closest('button, select, textarea, #suggestionReview')) {
       event.preventDefault(); $('#taskForm').requestSubmit(); return;

@@ -19,7 +19,7 @@ if(!publishableKey.startsWith('sb_publishable_')){
 }
 if(fs.existsSync(target)&&fs.lstatSync(target).isSymbolicLink())throw new Error('Refusing to build into a linked release directory.');
 fs.mkdirSync(target,{recursive:true});
-const files=['index.html','styles.css','app.js','task-model.js','cloud-sync.js','cloud.js','favicon.svg','vendor/supabase-2.118.0.js','vendor/supabase-LICENSE'];
+const files=['index.html','styles.css','app.js','task-model.js','cloud-sync.js','cloud.js','mind-map.js','favicon.svg','vendor/supabase-2.118.0.js','vendor/supabase-LICENSE'];
 // Remove only a previous generated release; reject links so the cleanup cannot escape this directory.
 for(const entry of fs.readdirSync(target,{withFileTypes:true})){
   if(entry.isSymbolicLink())throw new Error('Refusing to build over a linked release file.');

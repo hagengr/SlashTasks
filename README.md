@@ -13,6 +13,7 @@ This revision connects the web app to Supabase Auth and Postgres. Accounts sign 
 - Use **Help me choose** for an inline starting suggestion, or plan other captured work when today is clear.
 - Click a task title to edit. **N** creates a task, **/** opens search, **Enter** saves the task editor, and **Escape** closes it.
 - Give steps their own dates and times. Finishing the last step offers to complete the task or add more steps.
+- Choose **Mind map** in the task editor for visual capture: name the green task bubble, then use **＋ Add step** or **Enter** to add purple step bubbles. Edit dates and times on each step. **Ctrl/⌘ + Enter** saves; switching to **Form** keeps the same draft. The entry-mode preference is remembered on this device.
 - Set a display name and default reminder time in your profile.
 - Edit while disconnected after the app has loaded. Changes are saved in an account-specific IndexedDB journal before the app confirms the save. They upload when connectivity returns.
 - See pending saves, retry sync, and resolve conflicts explicitly. Changes to different fields merge; competing changes to the same field require a choice.
@@ -69,6 +70,7 @@ The existing regression suite covers task behavior, UI element contracts, the lo
 | File | Purpose |
 | --- | --- |
 | `app.js`, `index.html`, `styles.css` | Task views, editor, staged AI review, profile, and backups |
+| `mind-map.js` | Optional mind map input using the same editor fields and SVG branches |
 | `task-model.js` | Date filtering, reminders, recurrence, selection, and normalization |
 | `cloud.js` | Supabase authentication, account lifecycle, status UI, realtime hints |
 | `cloud-sync.js` | Durable journal, field patches, retry, acknowledgement, conflict resolution |
