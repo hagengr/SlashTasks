@@ -3,14 +3,14 @@
   'use strict';
   const $=s=>document.querySelector(s);
   const S=window.SlashTasksSync;
-  let client,engine,callbacks={},accountId=null,journal,channel,realtime,sessionEpoch=0,sendAfter=0,config={},profileDraft=null;
+  let client,engine,callbacks={},accountId=null,journal,channel,realtime,sessionEpoch=0,sendAfter=0,config={},profileDraft=null,authActivated=false;
   const escape=text=>String(text??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const requestControllers=new Set();
   function errorText(error) {
     const code=error?.code||'';
     if(/email_address_not_authorized/.test(code))return 'The email sender is still in private testing. Please use the email on your Supabase account.';
-    if(/over_email_send_rate_limit|over_request_rate_limit/.test(code))return 'Please wait before requesting another email. Check your inbox and spam folder for the earlier code.';
-    if(/otp_expired/.test(code))return 'That code expired or was already used. Request a new code.';
+    if(/over_email_send_rate_limit|over_request_rate_limit/.test(code))return 'Please wait before requesting another email. Check your inbox and spam folder for the earlier sign-in email.';
+    if(/otp_expired/.test(code))return 'That sign-in link or code expired or was already used. Request a new email.';
     return error?.message||'Could not connect. Please check your internet connection.';
   }
   async function rpc(name,args,expectedUser) {
@@ -52,14 +52,15 @@
   }
   async function activate(session) {
     const uid=session?.user?.id||null;
-    if(uid===accountId&&engine)return;
+    if(authActivated&&uid===accountId&&(engine||!uid))return;
+    authActivated=true;
     sessionEpoch++;
     engine?.stop();engine=null;
     if(realtime){client.removeChannel(realtime);realtime=null;}
     accountId=uid;
     callbacks.account?.(session?.user||null);
     $('#authPanel').hidden=!!uid;$('#appShell').hidden=!uid;
-    if(!uid)return;
+    if(!uid){$('#authStatus').textContent='';return;}
     $('#accountEmail').textContent=session.user.email||'Your account';
     $('#accountName').textContent='Your profile';
     journal ||= new S.IndexedJournal(globalThis.indexedDB,'slashtasks-cloud-'+new URL(config.url).hostname);
@@ -96,8 +97,12 @@
         $('#authStatus').textContent='Your cloud workspace is not configured yet. The project connection needs to be set up before signing in.';
         $('#emailSignInForm').hidden=true;return;
       }
+      const useCode=config.authMode==='otp';
+      $('#authDescription').textContent=useCode?'Your tasks, wherever you need them. Sign in with an email code.':'Your tasks, wherever you need them. Sign in with a link sent to your email.';
+      $('#sendCode').textContent=useCode?'Email me a code':'Email me a sign-in link';
+      const linkError=new URLSearchParams(location.hash.slice(1)).get('error_description');
       client=window.supabase.createClient(config.url,config.publishableKey,{
-        auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:false,storageKey:'slashtasks-auth-'+new URL(config.url).hostname}
+        auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,storageKey:'slashtasks-auth-'+new URL(config.url).hostname}
       });
       channel=typeof BroadcastChannel==='function'?new BroadcastChannel('slashtasks-cloud'):null;
       if(channel)channel.onmessage=event=>{if(event.data?.userId===accountId)engine?.reload();};
@@ -105,7 +110,7 @@
       const {data,error}=await client.auth.getSession();
       if(error)throw error;
       await activate(data.session);
-      $('#authStatus').textContent='';
+      $('#authStatus').textContent=linkError&&!data.session?linkError:'';
       window.addEventListener('online',()=>engine?.sync());
       window.addEventListener('offline',()=>engine?.reload());
       window.addEventListener('focus',()=>engine?.sync());
@@ -114,13 +119,16 @@
   }
   $('#emailSignInForm').addEventListener('submit',async event=>{
     event.preventDefault();if(!client)return;
-    if(Date.now()<sendAfter){$('#authStatus').textContent='Check your email, or wait a moment before requesting another code.';return;}
+    if(Date.now()<sendAfter){$('#authStatus').textContent='Check your email, or wait a moment before requesting another sign-in email.';return;}
     const email=$('#signInEmail').value.trim();
-    $('#sendCode').disabled=true;$('#authStatus').textContent='Sending your sign-in code…';
+    const useCode=config.authMode==='otp';
+    $('#sendCode').disabled=true;$('#authStatus').textContent=useCode?'Sending your sign-in code…':'Sending your sign-in link…';
     try{
-      const {error}=await client.auth.signInWithOtp({email,options:{shouldCreateUser:true}});
+      const {error}=await client.auth.signInWithOtp({email,options:{shouldCreateUser:true,emailRedirectTo:location.origin+'/'}});
       if(error)throw error;
-      sendAfter=Date.now()+60000;$('#verifyCodeForm').hidden=false;$('#authStatus').textContent='Check your inbox for your sign-in code.';$('#signInCode').focus();
+      sendAfter=Date.now()+60000;$('#verifyCodeForm').hidden=!useCode;
+      $('#authStatus').textContent=useCode?'Check your inbox for your sign-in code.':'Check your inbox and open the sign-in link on this device. Keep SlashTasks running if you are using the local app.';
+      if(useCode)$('#signInCode').focus();
     }catch(error){$('#authStatus').textContent=errorText(error);}
     finally{$('#sendCode').disabled=false;}
   });

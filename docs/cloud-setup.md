@@ -1,12 +1,29 @@
 # Cloud setup
 
-This is the deployment checklist for the cloud revision. It does not indicate that a project already exists. Use a Supabase Free project and a Cloudflare Pages site. No legacy browser-data migration is required.
+The cloud backend has been provisioned. This guide records its configuration and the remaining deployment steps. No legacy browser-data migration is required.
+
+| Setting | Current value |
+| --- | --- |
+| Project | SlashTasks |
+| Organization | hagengreen@gmail.com's Org |
+| Project reference | `uhzvlqibdwmzyfgxaolu` |
+| Plan | Free, quoted $0/month at creation |
+| Region | US West (`us-west-1`) |
+| API URL | `https://uhzvlqibdwmzyfgxaolu.supabase.co` |
+| Schema | Cloud sync migration applied |
+| Local connection | Public URL/key saved in ignored `.env` |
+| Local-network frontend | `http://192.168.68.100:4173` while this Mac's server is running |
+| Sign-in | Email link; local Auth Site URL configured by the user |
+| AI function | Deployed; suggestions disabled until workspace secrets/origins are configured |
+| Public frontend | Not deployed yet |
+
+[Open the project dashboard](https://supabase.com/dashboard/project/uhzvlqibdwmzyfgxaolu).
 
 ## 1. Create the project and database
 
-Create **SlashTasks** in your Supabase organization on the Free plan, using a US West region unless you prefer another. Keep the database password in your password manager.
+This step is complete for the project above. For a separate environment, create a Free project in your chosen organization and keep its database password in your password manager.
 
-Apply `supabase/migrations/202610200001_cloud_sync.sql` to the new project through the connected Supabase management tools or the dashboard SQL Editor. The migration creates profiles, lists, tasks, separate subtasks, version cursors, write receipts, ownership policies, and the sync functions. It is for a fresh database and should be applied once. With the Supabase CLI you can instead link the project and run:
+Apply `supabase/migrations/20261021042817_cloud_sync.sql` to the new project through the connected Supabase management tools or the dashboard SQL Editor. The migration creates profiles, lists, tasks, separate subtasks, version cursors, write receipts, ownership policies, and the sync functions. It is for a fresh database and should be applied once. With the Supabase CLI you can instead link the project and run:
 
 ```sh
 supabase link --project-ref YOUR_PROJECT_REF
@@ -19,13 +36,19 @@ The migration adds `sync_heads` to the Realtime publication when available. Real
 
 References: [database functions](https://supabase.com/docs/guides/database/functions), [row level security](https://supabase.com/docs/guides/database/postgres/row-level-security).
 
-## 2. Configure email codes
+## 2. Configure email sign-in
 
-Enable the Email provider and signups in Supabase Auth. Keep anonymous accounts disabled. Set email OTP length to **6** and expiry to **600 seconds**.
+The default app mode uses an emailed sign-in link with Supabase's standard templates. Enable the Email provider and signups, keep email confirmation enabled, and keep anonymous accounts disabled.
 
-Update both the **Confirm signup** and **Magic Link** email templates using `supabase/templates/sign-in.html`. Both must display `{{ .Token }}`. The app calls `signInWithOtp`, then `verifyOtp` with type `email`; it expects a code rather than a link. Set the Auth Site URL to the published HTTPS app address when it is known. `supabase/config.toml` records these settings, but editing that file alone does not configure a hosted project's dashboard settings.
+In [Auth URL Configuration](https://supabase.com/dashboard/project/uhzvlqibdwmzyfgxaolu/auth/url-configuration), set Site URL to **http://127.0.0.1:4173** for the local pilot. The app requests this origin as the email redirect. Set Site URL to the published HTTPS address when hosting is configured and allow the local origin as an additional redirect if local development should remain available. Keep the local server running while opening the email link on the same Mac. The SDK consumes the returned session and removes auth tokens from the URL.
 
-**For a private pilot:** Supabase's default email sender currently only delivers to addresses on the project's organization team and limits sending to two messages per hour. Use your Supabase account email for the initial sign-in. For other users, configure custom SMTP and a verified sender; an email provider's free allowance may be enough for a small pilot. This is separate from upgrading Supabase.
+The Supabase integration used here does not expose an Auth-configuration update tool, so URL settings must currently be saved in the dashboard.
+
+For another device on the same private network, add **http://192.168.68.100:4173/** as an additional Redirect URL and open that address on the device. Local-network serving is enabled in this Mac's `.env` with `SLASHTASKS_LAN_ENABLED=true`. The server accepts its actual private interface addresses and keeps local AI/settings endpoints restricted to loopback clients. A changed Mac IP needs a new allowed redirect. This frontend address is not an internet deployment.
+
+**For a private pilot:** Supabase's default email sender currently only delivers to addresses on the project's organization team and limits sending to two messages per hour. Use your Supabase account email for the initial sign-in. For other users, configure custom SMTP and a verified sender. This is separate from upgrading Supabase.
+
+**Optional email codes:** new Free projects using Supabase's default sender cannot customize auth email templates as of June 2026. To switch to codes, first configure custom SMTP, then update both **Confirm signup** and **Magic Link** templates using `supabase/templates/sign-in.html`, including `{{ .Token }}`. Set OTP length to 6 and expiry to 600 seconds, and set `SLASHTASKS_AUTH_MODE=otp` in the local/build environment. `supabase/config.toml` records the optional code templates; editing it alone does not change hosted Auth settings. See [Supabase's template restriction](https://supabase.com/changelog/46599-changes-to-email-template-customisation-on-free-tier).
 
 References: [email passwordless sign-in](https://supabase.com/docs/guides/auth/auth-email-passwordless), [SMTP setup and default-sender restrictions](https://supabase.com/docs/guides/auth/auth-smtp).
 
@@ -37,11 +60,12 @@ Copy `.env.example` to `.env`. Fill in only the public project connection for th
 SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
 SUPABASE_PUBLISHABLE_KEY=sb_publishable_YOUR_PUBLIC_KEY
 SLASHTASKS_AI_ENABLED=false
+SLASHTASKS_AUTH_MODE=magic_link
 ```
 
 Find these values in the project's connection/API settings. A legacy `anon` key is also supported. Never use `sb_secret_...` or a `service_role` key here. The public key is intentionally delivered to the browser; ownership is enforced by the authenticated API and database.
 
-Run `node server.js` or `start.command` and visit `http://127.0.0.1:4173`. Sign in with a code and create a task. Do not commit `.env` or paste secret keys into chat.
+Run `node server.js` or `start.command` and visit `http://127.0.0.1:4173`. Sign in through the emailed link and create a task. The default sender only accepts project-team emails, so use `hagengreen@gmail.com` for the pilot. Do not commit `.env` or paste secret keys into chat.
 
 ## 4. Publish the website
 
@@ -79,7 +103,7 @@ Use the dashboard secret editor for the OpenAI key so it does not enter shell hi
 
 ## Checks before rollout
 
-- Sign in using a real delivered code. Confirm a new account starts with zero tasks and the three built-in lists.
+- Sign in using a real delivered link. Confirm a new account starts with zero tasks and the three built-in lists.
 - Open the same account in two browsers. Create a task and dated steps, then edit different fields on each device.
 - Edit the same field while one device is disconnected. On reconnect, confirm the app asks which change to keep.
 - Disconnect a loaded tab, add a task, reload only after reconnecting, and confirm the queued task reaches the other device once.
@@ -89,3 +113,9 @@ Use the dashboard secret editor for the OpenAI key so it does not enter shell hi
 - If AI is enabled, confirm unauthenticated requests fail and suggestions still need user confirmation before saving.
 
 The repository contains protocol and PostgreSQL regression coverage. Live email delivery, hosted permissions, Realtime, browser IndexedDB behavior, and deployment settings still need these end-to-end checks after provisioning.
+
+### Database advisor review
+
+The live schema has RLS enabled on all application tables. The current security advisor reports three intentionally authenticated `SECURITY DEFINER` RPCs: `sync_pull`, `apply_sync_batch`, and `reserve_ai_request`. They need controlled database write access because direct client writes are revoked. Each checks `auth.uid()`, pins an empty search path, limits operations to the caller's account, and denies `anon` execution. Internal helper functions are not executable by client roles. See the [authenticated definer advisory](https://supabase.com/docs/guides/database/database-linter?lint=0029_authenticated_security_definer_function_executable).
+
+The private quota table deliberately has no client RLS policy or grants, so it is inaccessible outside the definer function. See [RLS enabled with no policy](https://supabase.com/docs/guides/database/database-linter?lint=0008_rls_enabled_no_policy). Fresh-database unused-index notices are expected before task traffic; keep the sync and parent indexes.

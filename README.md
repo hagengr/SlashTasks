@@ -2,9 +2,9 @@
 
 A calmer place to capture tasks, plan small steps, and find one thing to start.
 
-This revision connects the web app to Supabase Auth and Postgres. Accounts sign in with an email code, get a profile, and own their tasks, steps, and lists. New accounts start empty. No browser data is migrated automatically.
+This revision connects the web app to Supabase Auth and Postgres. Accounts sign in with an email link, get a profile, and own their tasks, steps, and lists. New accounts start empty. No browser data is migrated automatically. Email codes are also supported when custom SMTP is configured.
 
-**Deployment status:** the cloud implementation is ready to configure; a live Supabase project and public website have not been provisioned by this revision. Follow [Cloud setup](docs/cloud-setup.md) before opening this version for use. The working local prototype remains on `main` while this cloud revision is reviewed.
+**Deployment status:** the SlashTasks Free project is provisioned in US West and the database migration is applied. The local connection is configured in the ignored `.env` file, and Auth's Site URL is set to the local app. A public website has not been deployed. See [Cloud setup](docs/cloud-setup.md) for the current project and remaining rollout steps. The local prototype remains on `main` while this cloud revision is reviewed.
 
 ## What you can do
 
@@ -20,14 +20,20 @@ This revision connects the web app to Supabase Auth and Postgres. Accounts sign 
 
 ## Run locally against your cloud project
 
-1. Complete the database and email setup in [Cloud setup](docs/cloud-setup.md).
+1. Complete the Auth URL setup in [Cloud setup](docs/cloud-setup.md).
 2. Copy `.env.example` to `.env` and set `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY`.
 3. Run `node server.js`, or double-click `start.command` on this Mac.
-4. Open **http://127.0.0.1:4173**, enter your email, then enter the emailed code.
+4. Open **http://127.0.0.1:4173**, enter your Supabase team email, then open the emailed sign-in link on this Mac.
 
 The launcher uses Node.js on your PATH or the runtime bundled with Codex on this Mac. Node 18 or newer is required. Frontend dependencies are vendored, so running the app needs no package installation. Opening `index.html` directly is not the supported launch path.
 
 The browser receives the project URL and public publishable key. Database policies and authenticated RPCs protect each account. A service-role or Supabase secret key must never be placed in frontend configuration.
+
+### Use another device on your local network
+
+Local-network access is enabled on this Mac. Open **http://192.168.68.100:4173** from a device on the same network while the server remains running. For email sign-in, add **http://192.168.68.100:4173/** to Supabase Auth's additional Redirect URLs first.
+
+This address can change when the Mac changes networks. The launcher prints the current available network addresses. On another installation, opt in with `SLASHTASKS_LAN_ENABLED=true` in `.env` and restart the server. The default in `.env.example` is disabled. The app's data still lives in Supabase; the Mac serves the web interface.
 
 ## Optional AI suggestions
 

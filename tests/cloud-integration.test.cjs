@@ -11,7 +11,7 @@ class Store{
 test('two devices synchronize through the actual PostgreSQL RPC protocol',async t=>{
   const db=new PGlite();t.after(()=>db.close());
   await db.exec("create role anon; create role authenticated; create schema auth; create table auth.users(id uuid primary key); create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;");
-  await db.exec(fs.readFileSync(path.join(__dirname,'../supabase/migrations/202610200001_cloud_sync.sql'),'utf8'));
+  await db.exec(fs.readFileSync(path.join(__dirname,'../supabase/migrations/20261021042817_cloud_sync.sql'),'utf8'));
   const user=randomUUID();await db.query('insert into auth.users(id) values($1)',[user]);
   await db.query("select set_config('request.jwt.claim.sub',$1,false)",[user]);await db.exec('set role authenticated');
   const pull=async cursor=>(await db.query('select public.sync_pull($1) result',[cursor])).rows[0].result;

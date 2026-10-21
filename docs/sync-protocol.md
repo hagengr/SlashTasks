@@ -20,6 +20,8 @@ The web client writes an operation to IndexedDB before displaying save success. 
 
 Each user action gets one UUID and a set of mutations. A mutation contains `kind`, `id`, `patch`, `baseFields`, and `baseVersion`; optional flags request `delete` or explicit `restore`. `baseFields` records the server versions the user edited. Separate task and step mutations avoid rewriting an entire steps array when one checkbox changes. Task and step changes within an action are atomic.
 
+UUID generation falls back to random bytes when `crypto.randomUUID` is unavailable on a local-network HTTP page. Operation IDs remain RFC 4122 UUID strings accepted by Postgres.
+
 Call `apply_sync_batch({p_batch_id: UUID, p_mutations: [...]})`. Batches have a maximum of 200 mutations and 256 KiB; individual records have a 64 KiB limit. The web client rejects oversized actions before queueing them, preserving an open editor draft or allowing a smaller backup import. The database validates again, preflights the entire batch, and returns either `{ok:true, changes}` or `{ok:false, conflicts}`. No rows are written on a conflict. Malformed requests receive an error. Ordinary task editing fits these limits; a very large backup import may need splitting before import.
 
 The server stores a receipt for each accepted operation UUID and request body hash. If a response is lost after commit, retry the exact same UUID and body. The saved result is returned once more without repeating the write. Reusing an accepted UUID with different contents is rejected. Acknowledgement and outbox removal are persisted atomically on the client.
