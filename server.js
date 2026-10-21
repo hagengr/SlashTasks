@@ -22,11 +22,18 @@ function loadConfiguration(root, env) {
   let file = {};
   try { file = parseEnv(fs.readFileSync(path.join(root, '.env'), 'utf8')); }
   catch (error) { if (error.code !== 'ENOENT') console.error('Could not read local AI settings. Check .env file permissions.'); }
+  const candidate = env.SUPABASE_PUBLISHABLE_KEY || file.SUPABASE_PUBLISHABLE_KEY || '';
+  let publicKey = '';
+  if (candidate.startsWith('sb_publishable_')) publicKey = candidate;
+  else if (candidate && !candidate.startsWith('sb_secret_')) {
+    try { if (JSON.parse(Buffer.from(candidate.split('.')[1], 'base64url').toString()).role === 'anon') publicKey = candidate; }
+    catch { /* Misconfigured secret or unknown keys must never reach a browser. */ }
+  }
   return {
     apiKey: file.OPENAI_API_KEY || env.OPENAI_API_KEY || '',
     model: env.OPENAI_MODEL || file.OPENAI_MODEL || 'gpt-4o-mini',
     supabaseUrl: env.SUPABASE_URL || file.SUPABASE_URL || '',
-    supabaseKey: env.SUPABASE_PUBLISHABLE_KEY || file.SUPABASE_PUBLISHABLE_KEY || '',
+    supabaseKey: publicKey,
     aiEnabled: (env.SLASHTASKS_AI_ENABLED || file.SLASHTASKS_AI_ENABLED) === 'true'
   };
 }
